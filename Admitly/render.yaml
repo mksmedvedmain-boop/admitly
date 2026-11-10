@@ -1,0 +1,15 @@
+# Пример для Render. Проверьте значения и подставьте свой домен фронтенда.
+# Код бэкенда лежит в backend/, поэтому указан rootDir.
+services:
+  - type: web
+    name: admitly-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ADMITLY_CORS_ORIGINS
+        value: https://your-frontend-domain.example
+      - key: DATABASE_URL
+        sync: false   # строка Postgres из панели Render; без неё данные SQLite пропадают при перезапуске

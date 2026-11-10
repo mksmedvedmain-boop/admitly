@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Admitly — Find your fit</title>
+  <meta name="description"
+    content="Admitly — сервис подбора университетов через свайпы. Match Score показывает совпадение по вкусу, Admission Reality — оценку шансов на поступление по твоим баллам (в демо-версии диапазоны смоделированы).">
+  <meta name="theme-color" content="#F4F5F9">
+  <meta name="color-scheme" content="light">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Admitly — Find your fit">
+  <meta property="og:description"
+    content="Свайпай университеты, которые подходят под твой профиль. Match Score и Admission Reality считаются раздельно.">
+  <meta property="og:site_name" content="Admitly">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:locale:alternate" content="en_US">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Admitly — Find your fit">
+  <meta name="twitter:description"
+    content="Match Score показывает совпадение по вкусу, Admission Reality — оценку шансов на поступление.">
+
+  <link rel="icon" id="favicon" type="image/png" sizes="48x48" href="assets/favicon-48.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <meta property="og:image" content="assets/admitly-logo.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Onest: кириллица и латиница в одной гарнитуре, геометрия близка к логотипу Admitly.
+       Unbounded: дисплейный шрифт для крупных заголовков и числительных (01–04,
+       330, 40/1) — та пара Onest + Unbounded, что и задумывалась. -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800;900&display=swap">
+  <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20261102">
+</head>
+
+<body>
+  <!-- Общий фон неба для онбординга и приложения (день/ночь по теме); заполняется initAppBgNight() в app.js. На лендинге скрыт — там свой. -->
+  <div id="appBg" aria-hidden="true"></div>
+  <div id="app">
+
+    <!-- ============ LANDING ============ -->
+    <div id="landing"></div>
+
+    <!-- ============ ONBOARDING ============ -->
+    <div id="onboarding" class="hidden"></div>
+
+    <!-- ============ LOGIN / REGISTER ============ -->
+    <div id="login" class="hidden"></div>
+
+    <!-- ============ MAIN APP ============ -->
+    <div id="mainapp" class="hidden">
+      <div class="sidebar" id="sidebar"></div>
+      <div class="content" id="content"></div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <!-- Монетизация (MONETIZATION_SPEC.md): контейнер вне #app, чтобы paywall-модалка
+       рендерилась независимо от текущего экрана — обновляется в renderApp(). -->
+  <div id="paywall-root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+  <script src="unidata.js?v=20261102"></script>
+  <script src="app.js?v=20261102"></script>
+</body>
+
+</html>

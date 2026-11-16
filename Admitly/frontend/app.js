@@ -1063,7 +1063,7 @@ function clearAuthSession() {
    ============================================================ */
 // Адрес API. Локально (localhost) можно переопределить: index.html?api=http://127.0.0.1:8000
 const API_BASE = (() => {
-  const prod = 'https://unimatch-lfy3.onrender.com';
+  const prod = 'https://admitly-api-isod.onrender.com';
   try {
     const local = ['localhost', '127.0.0.1'].includes(location.hostname);
     const q = new URLSearchParams(location.search).get('api');

@@ -1132,12 +1132,11 @@ async function apiRequest(path, options = {}, { rawResponse, silent } = {}) {
 function apiSaveProfile() {
   // Эквивалент POST /users — создаёт гостя (если guestId ещё нет) или обновляет
   // существующего. Возвращает {id, guestId, isRegistered, email, lang, profile}.
-  // profile.majors (мульти-select) — только для фронта: бэкенд знает лишь про
-  // одно поле major, поэтому не отправляем ему массив, которого он не ждёт.
-  const { majors, ...profileForApi } = state.profile;
+  // majors (мульти-select) сохраняются на бэке (users.majors, JSON);
+  // major = первая выбранная специальность (обратная совместимость старых клиентов).
   return apiRequest('/users', {
     method: 'POST',
-    body: JSON.stringify({ guestId: state.guestId, lang: state.lang, profile: profileForApi })
+    body: JSON.stringify({ guestId: state.guestId, lang: state.lang, profile: state.profile })
   });
 }
 function apiFetchUser(userId) {
@@ -1158,7 +1157,7 @@ function apiFetchUniversity(userId, uniId) {
   // карточки нет ни в state.deck, ни в state.liked, ни в uniCache (см. viewUniversity).
   return apiRequest(`/universities/${uniId}?user_id=${userId}`);
 }
-// ---------------------------------------------------------------- monetization (MONETIZATION_SPEC.md)
+// ---------------------------------------------------------------- monetization (см. README.md)
 function apiFetchPlacements(userId, slot, universityId) {
   const q = universityId ? `&university_id=${universityId}` : '';
   return apiRequest(`/placements/${slot}?user_id=${userId}${q}`);
@@ -1187,12 +1186,8 @@ function apiDeleteSwipe(userId, universityId) {
    ПРЯМО в форме (см. renderLoginScreen), а не общим toast'ом — поэтому
    здесь не глушим и не тостим ошибку, а пробрасываем её с текстом из
    тела ответа бэкенда (FastAPI обычно отдаёт {detail: "..."} на 4xx).
-   ВАЖНО: судя по текущей интеграции (README/apiRegisterEmail — "мягкая"
-   регистрация по email без пароля), выделенных ручек /auth/login и
-   /auth/register с паролем на бэке ещё может не быть. Формат запроса/
-   ответа ниже — разумное предположение (email+password → {id, ...}, тот
-   же контракт, что и объект user из /users); если бэк отдаёт другую
-   форму ответа или другой путь — поправить только эти два хелпера. */
+   Контракт соответствует backend/main.py: POST /auth/login и
+   POST /auth/register (email + password → {id, token, email, ...}). */
 async function authRequest(path, body) {
   let res;
   try {
@@ -1297,17 +1292,21 @@ function mainDir(u, p) {
   return dirs.slice().sort((a, b) => (d.strengths[b] ?? 0) - (d.strengths[a] ?? 0))[0];
 }
 /* Реальная стоимость в год и честная оценка помощи. */
-/* Стоимость с учётом РЕАЛЬНОЙ помощи. Раньше любой вуз со стипендиями считался
-   «укладывается с помощью», даже если стипендии там маленькие и редкие, — поэтому при
-   маленьком бюджете в подборку попадали вузы, которые человек не потянет.
-   Теперь у каждого типа помощи есть реалистичный размер и надёжность (насколько
-   вероятно её получить):
-   full  — покрывает всю подтверждённую нужду (MIT, Princeton…): надёжно, но только при поступлении;
-   gov   — государственные гранты/бюджет: надёжно;
-   need  — частичная помощь по доходу семьи: средне;
-   merit — стипендии за успехи: небольшие, дают немногим, зависят от силы профиля;
-   low   — помощи почти нет. */
-const AID_RELIABILITY = { full: 0.8, gov: 0.7, need: 0.45, merit: 0.3, low: 0 };
+/* Стоимость с учётом помощи — БЕЗ выдуманных вероятностей. Раньше у каждого
+   типа помощи был коэффициент «надёжности» (0.8/0.7/0.45/0.3), который
+   смешивал шанс поступления, доступность помощи и её размер, — и «полное
+   покрытие нужды» (включая иностранцев) урезался до 0.15 вопреки
+   собственному каталогу. Теперь три вопроса разделены (зеркало
+   cost_info() в backend/scoring.py — менять синхронно):
+
+   1. ДОСТУПНОСТЬ (eligible): может ли студент этого происхождения вообще
+      претендовать на помощь. gov-помощь — только гражданам страны вуза;
+      need/full для иностранца — только если note вуза не говорит
+      «limited for internationals». merit-стипендии обычно открыты всем.
+   2. ПОКРЫТИЕ (aidMax, оценка): типичный максимум по ТИПУ помощи из
+      каталога — ориентир «по карману ли», а не обещание суммы. Точные
+      размеры зависят от семьи/конкурса — проверяйте на сайте вуза.
+   3. ВЕРДИКТ (verdict): да / только с помощью / нет. */
 function costInfo(u, p) {
   const d = uniData(u);
   const tuition = d ? d.tuition : u.cost;
@@ -1316,65 +1315,34 @@ function costInfo(u, p) {
   const aid = d ? d.aid : 'merit';
   const strength = academicStrength(p);
   const budget = p.budget || 0;
-  let aidMax = 0;
-  if (aid === 'full') aidMax = Math.max(0, total - budget);
-  else if (aid === 'gov') aidMax = Math.round(tuition + living * 0.6);
-  else if (aid === 'need') aidMax = Math.round(tuition * (p.needsAid === true ? 0.5 : 0.15));
-  else if (aid === 'merit') aidMax = Math.round(tuition * (strength >= 85 ? 0.4 : strength >= 70 ? 0.22 : 0.08));
-  let reliability = AID_RELIABILITY[aid] || 0;
   const domestic = !!p.homeCountry && p.homeCountry === u.country;
-  if (domestic && u.country === 'Russia') { aidMax = Math.max(aidMax, tuition); reliability = Math.max(reliability, 0.6); } // бюджетное место по ЕГЭ
 
-  /* КРИТИЧНО — ПРОИСХОЖДЕНИЕ СТУДЕНТА: «полное покрытие нужды» (aid='full',
-     надёжность 0.8) в реальности доступно ПОЧТИ ИСКЛЮЧИТЕЛЬНО domestic
-     студентам (в США — только US citizens/permanent residents: Pell Grant,
-     federal student loans, FAFSA-only). Для international students даже у
-     Harvard/MIT это ОДИН общий конкурсный пул на ~5-10 мест в год.
-     Поэтому если студент international (homeCountry ≠ u.country, или
-     homeCountry пуст — считаем international по умолчанию, чтобы не
-     обманывать пользователя завышенной доступностью aid) — reliability
-     для 'full' типа урезаем с 0.8 до 0.12 (примерно соответствует 1/8
-     фактической вероятности попадания в тот один пул).
-     Это гарантирует, что international студент с «нужна фин.помощь» не
-     увидит MIT как «95% Match + aid покроет всё» — реальность:
-     только top-1% профилю это возможно. */
-  const isInternationalStudent = !domestic;
-  // Для international студента: если aid-тип 'full' и note вуза явно
-  // говорит про international → урезаем reliability до 0.05-0.15 (честнее).
-  // Консистентно с matchScore() выше.
-  let intlLimited = false;
   const aidNote = (u.aid && u.aid.note || '').toLowerCase();
-  const noteHasIntlMention = /иностранц|international/.test(aidNote);
-  const noteSaysLimitedIntl = noteHasIntlMention && /limited|almost no|not available|no aid|only rare|нет|не да|не доступ|огранич/.test(aidNote);
-  // Любой тип помощи: если note явно говорит «limited for internationals» и
-  // студент из другой страны — помощь считается урезанной: считаем только
-  // остаток пула (~30% типичной помощи) с низкой надёжностью. Это честно
-  // отражается и во вкладке стоимости, и в подборке (через cost-компонент
-  // computeMatch): вуз не получает баллов за недоступную студенту помощь.
-  if (isInternationalStudent && noteSaysLimitedIntl) {
-    intlLimited = true;
-    aidMax = Math.round(aidMax * 0.3);
-    reliability = Math.min(reliability, 0.15);
-  }
-  if (isInternationalStudent && aid === 'full' && noteHasIntlMention) {
-    if (noteSaysLimitedIntl) {
-      reliability = 0.05;
-    }
-  }
-  if (isInternationalStudent && aid === 'full' && !noteHasIntlMention) {
-    // «Full need met» без упоминания international → считаем только merit-pool
-    // (не government) — урезаем с 0.8 до 0.15. Это консервативнее, но честнее
-    // для international студентов, которым gov-гранты США/UK недоступны.
-    reliability = Math.min(reliability, 0.15);
-  }
+  const noteMentionsIntl = /иностранц|international/.test(aidNote);
+  const noteSaysLimitedIntl = noteMentionsIntl && /limited|almost no|not available|no aid|only rare|нет|не да|не доступ|огранич/.test(aidNote);
 
+  // Типичная оценка максимального покрытия (доля платы за обучение).
+  let coverage = 0;
+  if (aid === 'full' || aid === 'gov') coverage = 1;   // вся подтверждённая нужда / бюджетное место
+  else if (aid === 'need') coverage = 0.4;             // типично 30–50% обучения
+  else if (aid === 'merit') coverage = strength >= 85 ? 0.4 : strength >= 70 ? 0.22 : 0.08;
+  // 'low' / неизвестный тип — помощи почти нет
+
+  let eligible = true;
+  if (!domestic) {
+    if (aid === 'gov') eligible = false;                         // гранты страны вуза — гражданам
+    if ((aid === 'full' || aid === 'need') && noteSaysLimitedIntl) eligible = false;
+  }
+  if (domestic && u.country === 'Russia' && aid === 'gov') coverage = 1; // бюджетное место по ЕГЭ
+
+  const needBased = aid === 'full' || aid === 'need' || aid === 'gov';
+  const aidMax = (!eligible || (needBased && p.needsAid === false)) ? 0 : Math.round(tuition * coverage);
   const netBest = Math.max(0, total - aidMax);
-  const netExpected = Math.max(0, Math.round(total - aidMax * reliability));
   let verdict;
   if (total <= budget) verdict = 'yes';
-  else if (netBest <= budget && reliability >= 0.3) verdict = 'aid';
+  else if (aidMax > 0 && netBest <= budget) verdict = 'aid';
   else verdict = 'no';
-  return { domestic, tuition, living, total, aid, aidMax, reliability, netBest, netExpected, budget, verdict, gap: Math.max(0, netBest - budget), over: Math.max(0, total - budget), intlLimited };
+  return { domestic, tuition, living, total, aid, aidMax, eligible, intlLimited: !domestic && noteSaysLimitedIntl, netBest, budget, verdict, gap: Math.max(0, netBest - budget), over: Math.max(0, total - budget) };
 }
 /* Шанс поступления словами (вместо Reach/Target/Likely без пояснений). */
 function chanceLabel(r) {
@@ -1382,14 +1350,15 @@ function chanceLabel(r) {
 }
 /* Свежесть каталога: дата последнего изменения данных (mtime
    backend/data/universities.json) пробрасывается генератором unidata.js
-   константой CATALOG_UPDATED. Честный бейдж «Цены проверены: …». */
+   константой CATALOG_UPDATED. Честный бейдж «Каталог обновлён: …»:
+   это дата изменения данных, а не дата ручной сверки цен. */
 function catalogUpdatedLabel() {
   if (typeof CATALOG_UPDATED === 'undefined' || !CATALOG_UPDATED) return '';
   const d = new Date(CATALOG_UPDATED + 'T12:00:00');
   if (isNaN(d)) return '';
   return isRu()
-    ? 'Цены проверены: ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
-    : 'Prices checked: ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    ? 'Каталог обновлён: ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+    : 'Catalog updated: ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 /* ---- Новый Match Score ----
    Направление 35 · стоимость 25 · шансы 15 · исследования 10 · город/климат/размер 15.
@@ -1400,7 +1369,7 @@ function matchParts(u, p) {
   const c = costInfo(u, p);
   let cost;
   if (c.verdict === 'yes') cost = 1;
-  else if (c.verdict === 'aid') cost = 0.35 + 0.55 * c.reliability * Math.min(1, c.budget / Math.max(c.netExpected, 1));
+  else if (c.verdict === 'aid') cost = 0.55;
   else cost = Math.max(0, 0.3 * Math.min(1, c.budget / Math.max(c.netBest, 1)));
   const r = u._reality || admissionReality(u, p);
   const chance = r === 'Likely' ? 1 : (r === 'Target' ? 0.85 : (u.acceptance < 0.1 ? 0.3 : 0.5));
@@ -1415,22 +1384,45 @@ function matchParts(u, p) {
      (IELTS 6.5+ / TOEFL 90+ / DET 110+ — уровень, на котором учёба идёт
      комфортно). Учёба на родном языке — 1. Другой язык без подготовки —
      0.3 (барьер: год подтяжки языка или программа-исключение). Если
-     пользователь не указал родной язык — нейтрально. */
-  const teachLang = COUNTRY_TEACH_LANG[u.country] || 'en';
-  let lang = 0.5;
-  if (teachLang === 'en') {
-    if (p.nativeLang === 'en') lang = 1;
-    else {
-      const goodEng = { IELTS: 6.5, TOEFL: 90, DET: 110 };
-      const eng = ['IELTS', 'TOEFL', 'DET'].filter(k => p.tests[k] && p.tests[k].taken);
-      lang = eng.some(k => p.tests[k].score >= goodEng[k]) ? 1 : (eng.length ? 0.65 : 0.5);
-    }
-  } else if (teachLang === (p.nativeLang || null)) {
-    lang = 1;
-  } else if (p.nativeLang) {
+     пользователь не указал родной язык — нейтрально.
+     Зеркало language_fit() в scoring.py: явный список teach_langs записи
+     каталога (см. UNI_EXTRA, ключи каталога с англоязычными программами)
+     бьёт фолбэк по стране. */
+  const teachLangs = (typeof UNI_EXTRA !== 'undefined' && UNI_EXTRA[u.id] && Array.isArray(UNI_EXTRA[u.id].teach_langs) && UNI_EXTRA[u.id].teach_langs.length)
+    ? UNI_EXTRA[u.id].teach_langs
+    : null;
+  let lang = 0.55;
+  if (teachLangs) {
+    // Явные языки программы: максимум по совпадению с родным/английским.
     lang = 0.3;
+    for (const teach of teachLangs) {
+      if (teach === 'en') {
+        if (p.nativeLang === 'en') lang = Math.max(lang, 1);
+        else {
+          const goodEng = { IELTS: 6.5, TOEFL: 90, DET: 110 };
+          const eng = ['IELTS', 'TOEFL', 'DET'].filter(k => p.tests[k] && p.tests[k].taken);
+          lang = Math.max(lang, eng.some(k => p.tests[k].score >= goodEng[k]) ? 1 : (eng.length ? 0.65 : 0.5));
+        }
+      } else if (teach === (p.nativeLang || null)) {
+        lang = Math.max(lang, 1);
+      }
+    }
   } else {
-    lang = 0.55; // родной язык не указан — нейтрально
+    const teachLang = COUNTRY_TEACH_LANG[u.country] || 'en';
+    if (teachLang === 'en') {
+      if (p.nativeLang === 'en') lang = 1;
+      else {
+        const goodEng = { IELTS: 6.5, TOEFL: 90, DET: 110 };
+        const eng = ['IELTS', 'TOEFL', 'DET'].filter(k => p.tests[k] && p.tests[k].taken);
+        lang = eng.some(k => p.tests[k].score >= goodEng[k]) ? 1 : (eng.length ? 0.65 : 0.5);
+      }
+    } else if (teachLang === (p.nativeLang || null)) {
+      lang = 1;
+    } else if (p.nativeLang) {
+      lang = 0.3;
+    } else {
+      lang = 0.55; // родной язык не указан — нейтрально
+    }
   }
   return { program, cost, chance, research, prefs, lang, strength: s, costInfo: c, reality: r };
 }
@@ -1448,9 +1440,8 @@ function computeMatch(u, p) {
   const c = m.costInfo;
   const w = matchWeightsFor(m);
   let score = m.program * w.program + m.cost * w.cost + m.chance * w.chance + m.research * w.research + (m.prefs || 0) * w.prefs + m.lang * w.lang;
-  // Не по карману даже с реальной помощью — вуз уходит вниз подборки, какой бы сильной ни была программа.
+  // Не по карману даже с помощью — вуз уходит вниз подборки, какой бы сильной ни была программа.
   if (c.verdict === 'no') score *= 0.5 + 0.3 * Math.min(1, c.budget / Math.max(c.netBest, 1));
-  else if (c.verdict === 'aid' && c.reliability < 0.5) score *= 0.88;
   if (u.id === 193 && p.degreeLevel === 'bachelor') score = Math.min(score, 25); // KAUST — только магистратура/PhD
   return Math.max(15, Math.min(99, Math.round(score)));
 }
@@ -1663,15 +1654,30 @@ function getDailyActivity() {
    не городить отдельную синхронизацию state<->localStorage.
    Двусторонняя синхронизация со свайпами — через toggleLike() ниже: лайкнул
    вуз → появилась запись трекера, убрал лайк → запись удаляется. ---------- */
-const TRACKER_KEY = 'unimatch_tracker_v1';
+/* Ключ трекера ПРИВЯЗАН К ПОЛЬЗОВАТЕЛЮ (userId), а не к браузеру. Раньше
+   один общий ключ unimatch_tracker_v1 обслуживал все аккаунты одного
+   браузера: при смене аккаунта статусы общих вузов переходили другому
+   человеку, а syncTrackerWithLiked() удалял записи, которых не было в
+   «чужих» лайках — прогресс предыдущего аккаунта терялся (R08 ревью).
+   Старый общий ключ один раз забирает первый открывший трекер пользователь
+   (миграция без потери данных), после чего удаляется. */
+const TRACKER_KEY_LEGACY = 'unimatch_tracker_v1';
+function trackerKey() { return 'unimatch_tracker_v2:' + (state.userId || 'guest'); }
 function loadTrackerData() {
   try {
-    const raw = lsGet(TRACKER_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const raw = lsGet(trackerKey());
+    if (raw) return JSON.parse(raw);
+    const legacy = lsGet(TRACKER_KEY_LEGACY);
+    if (legacy) {
+      lsSet(trackerKey(), legacy);
+      lsRemove(TRACKER_KEY_LEGACY);
+      return JSON.parse(legacy);
+    }
+    return {};
   } catch (e) { return {}; } // приватный режим браузера / localStorage недоступен
 }
 function saveTrackerData(data) {
-  try { lsSet(TRACKER_KEY, JSON.stringify(data)); } catch (e) { }
+  try { lsSet(trackerKey(), JSON.stringify(data)); } catch (e) { }
 }
 function trackerDefaultEntry() {
   return { status: 'not_started', checklist: { essay: false, recs: false, transcript: false, tests: false } };
@@ -1762,9 +1768,15 @@ function estimateDeadline(u) {
   } else {
     type = 'RD'; month = 1; day = 1; // 1 февраля — Азия/Океания/Ю.Америка/Африка
   }
+  // ПРОЗРАЧНОСТЬ (R07 ревью): дата ЭТОГО цикла была раньше — дедлайн
+  // прошёл, nextOccurrence молча уводит на следующий год. Помечаем это
+  // явно: UI показывает «дедлайн этого цикла прошёл», а не прячет
+  // пропущенный срок.
+  const thisCycle = new Date(new Date().getFullYear(), month, day);
+  const missedThisCycle = thisCycle < startOfToday();
   const date = nextOccurrence(month, day);
   const daysLeft = Math.round((date - startOfToday()) / 86400000);
-  return { type, date, daysLeft };
+  return { type, date, daysLeft, estimated: true, missedThisCycle };
 }
 function urgencyClass(daysLeft) {
   if (daysLeft < 0) return 'overdue';
@@ -2065,113 +2077,16 @@ function englishProficiencyLevel(p) {
   return { level: 'low', label_ru: 'Ниже типичных требований большинства вузов', label_en: 'Below typical requirements at most universities' };
 }
 
-// Базовые веса категорий Match Score. Сумма = 100%. Портировано 1:1 из
-// scoring.py (_BASE_WEIGHTS/_ALWAYS_KNOWN/_effective_weights) — см. комментарий
-// там же для полного разбора, здесь только краткая версия.
-const MATCH_BASE_WEIGHTS = { cs: 26, loc: 16, cost: 16, research: 13, size: 11, aid: 9, lang: 9 };
-const MATCH_ALWAYS_KNOWN = ['cs', 'cost', 'research'];
-
-// ИСПРАВЛЕНИЕ: раньше пустые setting/climate/size/needsAid превращались в
-// фиксированные "нейтральные" числа (0.6/0.7/0.7), которые прибавлялись ВСЕМ
-// вузам одинаково — 40% веса переставали различать вузы, и для гостя без
-// preferences Match Score у сильного и слабого вуза отличался на пару пунктов.
-// Теперь вес незаполненной категории перераспределяется на категории с
-// сигналом, который есть всегда (cs/cost/research), пропорционально их
-// базовым весам — сумма весов остаётся 100%, а скор опирается только на то,
-// что реально известно о пользователе.
-function matchWeights(p) {
-  const w = { ...MATCH_BASE_WEIGHTS };
-  let pool = 0;
-  if (!p.setting.length && !p.climate.length) { pool += w.loc; delete w.loc; }
-  if (!p.size.length) { pool += w.size; delete w.size; }
-  if (p.needsAid !== true) { pool += w.aid; delete w.aid; }
-  if (pool) {
-    const knownTotal = MATCH_ALWAYS_KNOWN.reduce((s, k) => s + MATCH_BASE_WEIGHTS[k], 0);
-    MATCH_ALWAYS_KNOWN.forEach(k => { w[k] += pool * (MATCH_BASE_WEIGHTS[k] / knownTotal); });
-  }
-  return w;
-}
-
+/* ЕДИНСТВЕННАЯ фронтовая реализация Match Score. Раньше их было три:
+   matchScore() (старая формула cs 26 / loc 16 / cost 16 / …), computeMatch()
+   (актуальная: направление 31 / стоимость 25–40 / шансы 13 / …) и серверный
+   match_score() в scoring.py. Веса и признаки расходились — share-ссылка
+   родителя и экран владельца показывали разные проценты. Теперь:
+   - computeMatch() — единственная фронтовая формула, совпадает с
+     backend/scoring.py (match_parts/match_weights_for/match_score);
+   - matchScore() — тонкая обёртка для старых вызовов (findUni). */
 function matchScore(u, p) {
-  const w = matchWeights(p);
-  let score = 0;
-  // CS fit
-  score += (u.cs / 100) * w.cs;
-  // Cost fit (lower cost relative to budget = better, but not penalized much if under)
-  let costRatio = p.budget > 0 ? u.cost / p.budget : 1;
-  let costFit = costRatio <= 1 ? 1 : Math.max(0, 1 - (costRatio - 1) * 0.8);
-  score += costFit * w.cost;
-  // Research fit
-  let researchFit = 1 - Math.abs(u.research - p.research) / 5;
-  score += Math.max(0, researchFit) * w.research;
-  // Location fit (setting + climate) — только если что-то из этого указано
-  if (w.loc !== undefined) {
-    let locFit = 0;
-    if (p.setting.length && p.setting.includes(u.setting)) locFit += 0.55;
-    if (p.climate.length && p.climate.includes(u.climate)) locFit += 0.45;
-    score += locFit * w.loc;
-  }
-  // Size fit — только если список не пуст
-  if (w.size !== undefined) {
-    let sizeFit = p.size.includes(u.size) ? 1 : 0.4;
-    score += sizeFit * w.size;
-  }
-  // Financial aid fit — только если студент явно отметил, что помощь важна
-  if (w.aid !== undefined) {
-    // ФИНАНСОВАЯ ПОМОЩЬ + ПРОИСХОЖДЕНИЕ СТУДЕНТА:
-    // реальность рынка в том, что большие need-based гранты (aid.level === 'High',
-    // «full need met») в США почти никогда не даются international students.
-    // Если студент international (homeCountry ≠ u.country, или homeCountry пуст —
-    // по умолчанию считаем «international»), и note явно говорит «limited for international",
-    // то aidFit = 0, независимо от заявленного уровня вуза. Это ключевой баг:
-    // у MIT в заметке «Meets 100% need» (High), но это только для domestic —
-    // а вы у него международный студент → фактический fit почти нулевой.
-    // (Правка 2026-11: раньше стояло исключение «aidLevel !== 'High'» — вузы
-    //  с заявленным «Meets 100% need» продолжали получать полный aidFit даже
-    //  при явном «limited for internationals» в заметке. Исключение убрано.)
-    let aidLevel = u.aid.level;
-    const isInternational = !(p.homeCountry && p.homeCountry === u.country);
-    // Регулярка: ищем явное упоминание, что помощь недоступна/ограничена для
-    // international. Старый паттерн с /вузам/ был слишком широким и матчил
-    // случайные строки UNI_DATA (например «Лидер мировых рейтингов по…»).
-    // Точнее: 'иностранц' или 'international' рядом с 'limited|нет|almost no|не да|не доступ|only rare|огранич'.
-    const aidNote = (u.aid.note || '').toLowerCase();
-    const noteSaysLimitedIntl = /иностранц|international/.test(aidNote) && /limited|almost no|not available|no aid|only rare|нет|не да|не доступ|огранич/.test(aidNote);
-    if (isInternational && noteSaysLimitedIntl) {
-      // note явно говорит, что международным студентам помощь ограничена
-      aidLevel = 'Low';
-    }
-    let aidFit = { High: 1, Medium: 0.6, Low: 0.25 }[aidLevel] ?? 0.5;
-    // Если студент domestic (homeCountry === u.country), вузы его страны имеют
-    // доступ к gov-грантам → бустим aidFit для domestic-вузов, чтобы студент
-    // видел, что у него реально хорошие стипендии именно дома.
-    if (!isInternational && aidLevel !== 'Low') {
-      aidFit = Math.min(1, aidFit + 0.15);
-    }
-    score += aidFit * w.aid;
-  }
-  // Language fit — язык обучения вуза против родного языка/английского студента.
-  // Та же логика, что в matchParts() (см. комментарий там).
-  if (w.lang !== undefined) {
-    const teachLang = COUNTRY_TEACH_LANG[u.country] || 'en';
-    let langFit = 0.5;
-    if (teachLang === 'en') {
-      if (p.nativeLang === 'en') langFit = 1;
-      else {
-        const goodEng = { IELTS: 6.5, TOEFL: 90, DET: 110 };
-        const eng = ['IELTS', 'TOEFL', 'DET'].filter(k => p.tests[k] && p.tests[k].taken);
-        langFit = eng.some(k => p.tests[k].score >= goodEng[k]) ? 1 : (eng.length ? 0.65 : 0.5);
-      }
-    } else if (teachLang === (p.nativeLang || null)) {
-      langFit = 1;
-    } else if (p.nativeLang) {
-      langFit = 0.3;
-    } else {
-      langFit = 0.55;
-    }
-    score += langFit * w.lang;
-  }
-  return Math.max(40, Math.min(99, Math.round(score)));
+  return computeMatch(u, p);
 }
 
 function toSATEquivalent(testKey, score) {
@@ -2189,12 +2104,17 @@ function admissionReality(u, p) {
   // comparing a student's own numbers against that published range — not by inventing a
   // single blended "how strong is this student" score and diffing it against acceptance rate.
   // ДАННЫЕ: для вузов США SAT 25/75 взяты из College Scorecard (где вуз не сообщает SAT, значение
-  // оценено по доле принятых). GPA 25/75 и все баллы вузов вне США оценены по доле принятых
-  // (formula в tools/build_data.py), это ориентиры, а не опубликованные Common Data Set.
+  // оценено по доле принятых). GPA 25/75 и все баллы вузов вне США оценены по доле принятых —
+  // это ориентиры, а не опубликованные Common Data Set.
   const rank = { below: 0, within: 1, above: 2 };
   const gpaPos = p.gpa < u.gpa25 ? 'below' : (p.gpa > u.gpa75 ? 'above' : 'within');
 
-  const academicKeys = Object.keys(p.tests || {}).filter(k => k !== 'IELTS' && p.tests[k] && p.tests[k].taken);
+  // АКАДЕМИЧЕСКИЕ тесты — только SAT/ACT/IB/ЕГЭ (ACADEMIC_TESTS). Раньше
+  // фильтровался один IELTS, и TOEFL/DET (тесты на АНГЛИЙСКИЙ) попадали в
+  // перевод на шкалу SAT: TOEFL 60 мог превратить «Likely» в «Reach» —
+  // языковой тест не должен менять академическую оценку (зеркало
+  // admission_reality() в backend/scoring.py, R03 ревью).
+  const academicKeys = ACADEMIC_TESTS.filter(k => p.tests[k] && p.tests[k].taken);
   let testPos = null;
   if (academicKeys.length) {
     // If the student reports both SAT and ACT, use whichever reflects better on them —
@@ -2226,7 +2146,7 @@ function admissionReality(u, p) {
 
 /* ============================================================
    MONETIZATION — Admission Reality "What if" simulator
-   (см. MONETIZATION_SPEC.md, раздел 1). Намеренно без запроса к бэку на
+   (см. README.md, раздел «Монетизация»). Намеренно без запроса к бэку на
    каждое движение слайдера: admissionReality() уже чистая функция без
    побочных эффектов, портированная 1:1 из scoring.py — принимает
    произвольные gpa/sat вместо state.profile, ничего не пишет в state и
@@ -4742,8 +4662,9 @@ function setMajor(value) {
     arr.push(value);
   }
   pickPop(`[onclick="setMajor('${value}')"]`);
-  // major — первая выбранная специальность, "основная": она одна уходит на
-  // бэкенд (там пока только одно поле major) и определяет набор осей DNA.
+  // major — первая выбранная специальность, "основная" (обратная совместимость
+  // со старыми клиентами и часть осей DNA). Полный набор теперь уходит
+  // в users.majors на бэке.
   state.profile.major = arr[0];
   restoreScrollAround(renderOnboarding);
 }
@@ -5762,7 +5683,7 @@ function buildUniPdf(uniId) {
   ${kv(ru ? 'Город' : 'Setting', esc(trvPdf('setting', u.setting)))}
   ${kv(ru ? 'Климат' : 'Climate', esc(trvPdf('climate', u.climate)))}
   ${kv(ru ? 'Исследования' : 'Research', u.research + '/5')}
-  ${kv(ru ? 'Следующий дедлайн' : 'Next deadline', milestone ? milestone.date.toLocaleDateString(ru ? 'ru-RU' : 'en-US', { day: 'numeric', month: 'long' }) + ' (' + esc(deadlineTypeLabel(meta.type)) + ')' : '—')}
+  ${kv(ru ? 'Следующий дедлайн (оценка)' : 'Next deadline (estimated)', milestone ? '≈ ' + milestone.date.toLocaleDateString(ru ? 'ru-RU' : 'en-US', { day: 'numeric', month: 'long' }) + ' (' + esc(deadlineTypeLabel(meta.type)) + ')' : '—')}
 </div>
 <h2>${ru ? 'О вузе' : 'About'}</h2>
 <p class="desc">${esc(uniDesc(u))}</p>
@@ -5880,7 +5801,7 @@ function trackerRowHtml(r, idx, flash) {
       </div>
       <div class="app-side">
         ${active
-          ? `<div class="app-deadline u-${urgencyClass(meta.daysLeft)}"><b>≈ ${fmtDeadlineDate(meta.date)}</b><span>${ru ? 'ориентировочно · ' : 'estimated · '}${deadlineTypeLabel(meta.type)} · ${shortDays(meta.daysLeft)}</span></div>`
+          ? `<div class="app-deadline u-${urgencyClass(meta.daysLeft)}"><b>≈ ${fmtDeadlineDate(meta.date)}</b><span>${ru ? 'ориентировочно · ' : 'estimated · '}${deadlineTypeLabel(meta.type)} · ${shortDays(meta.daysLeft)}${meta.missedThisCycle ? (ru ? ' · дедлайн этого цикла прошёл' : ' · this cycle\u00A0has passed') : ''}</span></div>`
           : `<div class="app-deadline is-done"><b>${t('status_' + entry.status)}</b></div>`}
         <label class="status-pill s-${entry.status}">
           <i class="sp-dot"></i><span>${t('status_' + entry.status)}</span>${ICONS.chevronDown}
@@ -6217,8 +6138,8 @@ function findUni(id) {
 
 /* ИСПРАВЛЕНИЕ: раньше findUni() либо находил вуз среди уже загруженного
    (state.liked/state.deck), либо откатывался на локальный справочник
-   UNIVERSITIES — но там всего 50 записей, тогда как в базе на бэкенде их 200.
-   Карточку любого университета за пределами этих 50, которого не было в
+   UNIVERSITIES — но он покрывает только часть каталога бэкенда.
+   Карточку университета за пределами справочника, которого не было в
    текущей (отфильтрованной) подборке или в лайках, открыть было невозможно —
    renderUniversityDetail молча возвращал на Discover. Теперь, если findUni()
    ничего не находит синхронно, идём напрямую на бэкенд за конкретным id
@@ -6739,11 +6660,12 @@ async function loadSessionForUser(userId) {
   state.isPremium = !!user.isPremium;
   state.profile = Object.assign(state.profile, user.profile);
   applyProfileExtras(state.profile);
-  // Бэкенд хранит только одну специальность (profile.major) — мульти-select
-  // существует только на фронте. После загрузки профиля с бэка синхронизируем
-  // majors с тем, что реально пришло, иначе там мог остаться дефолт из
-  // начального state и разойтись с тем, что видит пользователь.
-  state.profile.majors = state.profile.major ? [state.profile.major] : [];
+  // users.majors теперь хранится на бэке. Если её нет (старые клиенты/гость),
+  // восстанавливаем мульти-select из profile.major.
+  state.profile.majors = Array.isArray(state.profile.majors) && state.profile.majors.length
+    ? state.profile.majors
+    : (state.profile.major ? [state.profile.major] : []);
+  if (state.profile.majors.length) state.profile.major = state.profile.majors[0];
   // size/setting/climate теперь мульти-select (массивы) на фронте; бэкенд
   // может вернуть старую схему (null или одиночную строку) — приводим к
   // массиву на всякий случай, чтобы .includes()/.length в коде выше не упали.

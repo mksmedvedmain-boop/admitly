@@ -41,7 +41,11 @@ def unit_tests():
     print("\n=== social_auth: проверка подписи Telegram (юнит) ===")
 
     bot_token = "123456:TEST-BOT-TOKEN"
-    data = {"id": 42, "first_name": "Тест", "auth_date": 1790000000, "username": "tester"}
+    # auth_date — «сейчас»: подпись проверяется отдельно от свежести,
+    # но валидным payload считается только не старше 24 часов (см. ниже
+    # отдельные проверки свежести в unit-тестах и test_fixes.py).
+    import time as _time
+    data = {"id": 42, "first_name": "Тест", "auth_date": int(_time.time()), "username": "tester"}
     dcs = "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
     secret = hashlib.sha256(bot_token.encode()).digest()
     good = hmac.new(secret, dcs.encode(), hashlib.sha256).hexdigest()

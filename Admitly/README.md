@@ -39,27 +39,72 @@ Admission Reality (оценка шансов по баллам). 330 вузов 
 - **Карта в мобильной версии**: подпись «Нажми на регион, чтобы выбрать его
   или снять выбор» больше не капсом и без разреженных букв — обычный
   читаемый текст.
-- Проверено: test_scoring.py 26/26, test_auth.py 54 ok, test_catalog.py 24 ok.
+
+## Что нового в этой версии
+
+- **Единый скоринг фронт/бэк (R06)**: `match_score()` в `scoring.py` — зеркало
+  формулы `computeMatch()` из `app.js` (те же веса и пороги), карточки
+  «Match» и «Reality» совпадают до смешного.
+- **Свежесть каталога**: бейдж переименован в «Каталог обновлён: …» — это дата
+  изменения данных, а не ручной сверки. Ручная сверка — поле `verified_at`
+  в `backend/data/catalog_meta.json`.
+- **Язык обучения (R03)**: явный список `teach_langs` у 40 записей каталога
+  (KAUST, NYU Abu Dhabi, Нидерланды, Гонконг, Сингапур, KAIST и др.)
+  бьёт фолбэк по стране — и на фронте (`UNI_EXTRA`), и на бэке
+  (`scoring.language_fit`).
+- **Дедлайны честно оценочные (R07)**: «≈» в карточке трекера, «(оценка)» в
+  профиле вуза, и пометка «дедлайн этого цикла прошёл», если оценка уже
+  позади, а статус заявки ещё активен.
+- **Трекер изолирован по пользователю (R08)**: ключ localStorage
+  `unimatch_tracker_v2:<userId>` — один аккаунт не видит заявки другого.
+- **Мульти-специальности на бэке (R15)**: `users.majors` (JSON), полный набор
+  сохраняется и восстанавливается, `major` — первая выбранная (совместимость).
+- **Миграции**: `migrations.py` — версионные шаги (users.majors,
+  sessions.expires_at, stripe_events, teach_langs), номер схемы в
+  `schema_version`.
+- **Stripe-цикл без дыр (R02)**: дедупликация событий по `stripe_events`,
+  поиск пользователя по `subscription_id`, 502 при сбое Stripe (рётри),
+  «тихий» fallback на 30 дней удалён.
+- **Соцвход (R01)**: валидная Bearer-сессия любого гостевого/соц-аккаунта
+  открывает все ручки пользователя; соц-аккаунт с верифицированным email
+  сразу становится `is_registered`.
+- **Telegram (R01)**: `auth_date` старше 1 часа отвергается (freshness).
+- **Сессии**: TTL 30 дней, ручка `DELETE /users/{id}/sessions` (выход со всех
+  устройств), лимит 10 неудачных логинов / 15 мин на (IP, email) → 429.
+- **API-слои чистые (R17)**: `app.js` разбит логически на модули-секции
+  (API-слой, scoring, tracker, UI), мёртвые ссылки на MONETIZATION_SPEC.md,
+  README_backend.md и tools/build_data.py убраны.
+- **render.yaml (R09)**: `rootDir: Admitly/backend` — путь теперь соответствует
+  структуре репозитория.
+- **CI**: `.github/workflows/ci.yml` гоняет все 5 наборов тестов на каждый
+  push/PR.
+- Проверено: test_scoring.py 30/30, test_auth.py 54 ok, test_catalog.py 24 ok,
+  test_fixes.py 13/13, test_social.py (юнит) 7 ok.
 
 ## Структура
 
 ```
 admitly/
-├── render.yaml              # деплой API на Render (rootDir: backend)
+├── render.yaml              # деплой API на Render (rootDir: Admitly/backend)
+├── .github/workflows/ci.yml # CI: 5 наборов тестов на каждый push/PR
 ├── README.md                # этот файл
 ├── tools/
 │   └── make_unidata.py      # генератор frontend/unidata.js из каталога
 ├── backend/                 # FastAPI API (Python)
 │   ├── main.py              # точка входа (uvicorn main:app)
-│   ├── models.py            # таблицы БД (users, swipes, sessions, share_links)
+│   ├── models.py            # таблицы БД (users, swipes, sessions, share_links, stripe_events)
 │   ├── schemas.py           # Pydantic-схемы запросов/ответов
 │   ├── scoring.py           # Match Score, шансы, язык, стипендии
 │   ├── auth.py              # регистрация/вход, pbkdf2-хэши, Bearer-сессии
+│   ├── social_auth.py       # Google/Яндекс/Telegram — проверка токенов
+│   ├── payments.py          # Stripe-чекаут и вебхуки
 │   ├── entitlements.py      # Premium-права
+│   ├── migrations.py        # версионные миграции схемы (schema_version)
 │   ├── placements.py        # партнёрские переходы (/go)
 │   ├── database.py          # подключение БД (SQLite по умолчанию / Postgres)
 │   ├── seed_data.py         # заливка каталога вузов в БД при старте
 │   ├── data/universities.json   # 330 вузов — источник истины каталога
+│   ├── data/catalog_meta.json   # verified_at — дата ручной сверки цен
 │   ├── test_*.py            # тесты (см. «Тесты»)
 │   ├── requirements.txt     # зависимости
 │   ├── runtime.txt          # версия Python для Render
@@ -120,24 +165,38 @@ http://localhost:5500/?api=http://127.0.0.1:8000
 
 ### 3. Тесты
 
+Важно: тесты используют самописный фреймворк `check()` (плюс `unittest` в
+`test_fixes.py`), запускать их нужно напрямую — `python3 -m unittest` их не
+найдёт (0 тестов):
+
 ```bash
 cd backend
-python3 -m unittest test_scoring        # юнит-тесты скоринга — сервер не нужен
-python3 test_social.py                  # соцвход/оплата: юнит-часть без сервера
-python3 -m unittest test_auth            # интеграционные — нужен поднятый uvicorn (порт 8000)
-python3 -m unittest test_catalog         # интеграционные — тоже
+python3 test_scoring.py    # юнит-тесты скоринга — сервер не нужен
+python3 test_social.py     # соцвход/оплата: юнит-часть без сервера
+python3 test_fixes.py      # миграции, teach_langs, Stripe-дедуп — без сервера
+python3 test_auth.py       # интеграционные — нужен поднятый uvicorn (порт 8000)
+python3 test_catalog.py    # интеграционные — тоже
 ```
 
-Актуальный статус: scoring 26/26, auth 54 ok, catalog 27 ok, social/payments 16 ok.
+CI (`.github/workflows/ci.yml`) гоняет все пять наборов на каждый push/PR.
+
+Актуальный статус: scoring 30/30, auth 54 ok, catalog 24 ok, fixes 13/13,
+social (юнит) 7 ok.
 
 ## Соцвход (Google / Яндекс / Telegram)
 
 Связка «аккаунт провайдера → профиль Admitly» хранится в БД (таблица
 `social_accounts`), токены провайдеров проверяет **бэкенд** (`social_auth.py`):
 Google — userinfo.googleapis.com, Яндекс — login.yandex.ru/info,
-Telegram — HMAC-подпись Login Widget токеном бота. Фронт только получает
-токен и присылает его на `POST /auth/social` — как и email-вход, соцвход
-выдаёт серверную сессию и «усыновляет» текущую гостевую (прогресс не теряется).
+Telegram — HMAC-подпись Login Widget токеном бота (плюс freshness: `auth_date`
+старше 1 часа отвергается). Фронт только получает токен и присылает его на
+`POST /auth/social` — как и email-вход, соцвход выдаёт серверную сессию и
+«усыновляет» текущую гостевую (прогресс не теряется).
+
+Валидная Bearer-сессия открывает все ручки пользователя (гостя и
+зарегистрированного): `/users/{id}`, свайпы, трекер. Соц-аккаунт с
+верифицированным email сразу помечается `is_registered` — можно задать пароль
+и входить по email.
 
 Чтобы кнопки заработали, нужны ключи:
 
@@ -157,6 +216,11 @@ Telegram — HMAC-подпись Login Widget токеном бота. Фрон�
 Stripe присылает вебхук `POST /payments/webhook` (подпись проверяется
 секретом) → бэкенд включает `Entitlement.plan=premium` до конца оплаченного
 периода. Отмена подписки или неоплата — план возвращается в `free`.
+
+Дедупликация вебхуков по `stripe_events` (id события), повторная доставка
+`invoice.paid` находит пользователя по `subscription_id`, сбой обращения к
+Stripe отдаёт 502 — Stripe повторит доставку. Ничего не теряется и не
+двойится.
 
 **Поведение без ключей честное:** `GET /payments/config` говорит
 `{stripe: false}`, чекаут отвечает 503, кнопки оплаты не рисуются.
@@ -188,12 +252,22 @@ python3 tools/make_unidata.py
 
 ## Деплой
 
-- **API**: Render, сервис из `render.yaml` (rootDir `backend`). Обязательно
+- **API**: Render, сервис из `render.yaml` (rootDir `Admitly/backend`). Обязательно
   задай `DATABASE_URL` (Postgres) — без него данные будут жить в SQLite и
   пропадут при перезапуске. В `ADMITLY_CORS_ORIGINS` укажи домен фронтенда.
 - **Фронтенд**: любую статику (Render Static Site, Netlify, Vercel, GitHub
-  Pages). В `app.js` найди `const prod = 'https://unimatch-lfy3.onrender.com'`
+  Pages). В `app.js` найди `const prod = 'https://admitly-api-isod.onrender.com'`
   и подставь адрес своего API.
+
+## Сессии и безопасность
+
+- Bearer-сессии с TTL 30 дней (`sessions.expires_at`), `DELETE
+  /users/{id}/sessions` — выход со всех устройств.
+- Лимит на подбор пароля: 10 неудачных попыток за 15 минут на пару
+  (IP, email) → 429 (в памяти процесса).
+- Share-ссылки (`share_links`) — только чтение (GET), Premium-контент
+  (PDF-отчёт) по ссылке не отдаётся: серверная проверка прав в
+  `entitlements.py` (402 Paywall), а не «доверие фронтенда».
 
 ## Что дальше (идеи продолжения)
 
@@ -202,5 +276,5 @@ python3 tools/make_unidata.py
    готов — оживают при вставке ключей.
 2. **Восстановление пароля** — роуты «забыл пароль» + email-сервис
    (Resend, 100 писем/день бесплатно).
-3. **Лимит попыток входа** — простой счётчик на email против перебора.
-4. **Дедлайны и заявки** — таблица дедлайнов вуза + напоминания в шортлист.
+3. **Дедлайны и заявки** — таблица реальных дедлайнов вуза (сейчас оценка)
+   + напоминания в шортлист.

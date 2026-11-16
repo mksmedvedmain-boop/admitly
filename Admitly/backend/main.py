@@ -1,8 +1,9 @@
 import json
 import os
+import time
 import uuid
-from collections import Counter
-from datetime import datetime
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 from typing import List
 
 import secrets
@@ -21,39 +22,12 @@ import payments
 import placements
 import social_auth  # noqa: F401 — проверка токенов соцвхода (роут /auth/social)
 from database import Base, engine, get_db
+import migrations
 import seed_data
+
+Base.metadata.create_all(bind=engine)  # новые таблицы (create_all не трогает существующие)
+migrations.apply(engine)               # версионированные изменения СХЕМЫ существующих таблиц
 seed_data.seed()
-Base.metadata.create_all(bind=engine)  # для SQLite/локальной разработки; в проде — Alembic-миграции
-
-
-# ---------------------------------------------------------------- migrations (SQLite)
-def _migrate_sqlite():
-    """
-    create_all не добавляет колонки в уже существующие таблицы — только создаёт
-    новые. Если unimatch.db создан старой версией кода (без users.password_hash),
-    докидываем колонку руками, иначе SQLAlchemy упадёт на первом же SELECT users.
-    Для PostgreSQL это дело Alembic; здесь локальная разработка на SQLite.
-    PRAGMA — синтаксис SQLite, на Postgres запрос упал бы и уронил старт
-    приложения, поэтому выходим сразу на любом другом диалекте.
-    """
-    if engine.dialect.name != "sqlite":
-        return
-    with engine.connect() as conn:
-        cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(users)")]
-        # password_hash нужен для /auth/login; home_country/native_lang — новые
-        # поля профиля (шаг "About you" на фронте). Всё остальное во фронтовом
-        # payload уже помещается в существующие колонки.
-        for col, ddl in (
-            ("password_hash", "ALTER TABLE users ADD COLUMN password_hash VARCHAR"),
-            ("home_country", "ALTER TABLE users ADD COLUMN home_country VARCHAR DEFAULT ''"),
-            ("native_lang", "ALTER TABLE users ADD COLUMN native_lang VARCHAR DEFAULT ''"),
-        ):
-            if cols and col not in cols:
-                conn.exec_driver_sql(ddl)
-        conn.commit()
-
-
-_migrate_sqlite()
 
 
 def _normalize_email(email: str) -> str:
@@ -73,10 +47,17 @@ def _bearer_token(request: Request) -> str:
     return ""
 
 
+SESSION_TTL_DAYS = 30
+
+
 def _issue_session(db: Session, user_id: int) -> str:
-    """Создаёт серверную сессию, возвращает непрозрачный токен."""
+    """Создаёт серверную сессию (срок жизни 30 дней), возвращает токен."""
     token = secrets.token_urlsafe(32)
-    db.add(models.AuthSession(token=token, user_id=user_id))
+    db.add(models.AuthSession(
+        token=token,
+        user_id=user_id,
+        expires_at=datetime.utcnow() + timedelta(days=SESSION_TTL_DAYS),
+    ))
     return token
 
 
@@ -84,42 +65,61 @@ def _guest_token(request: Request) -> str:
     return (request.headers.get("x-guest-token") or "").strip() if request else ""
 
 
+def _session_user(db: Session, request: Request) -> models.User | None:
+    """Пользователь по валидной (не протухшей) серверной сессии, иначе None."""
+    token = _bearer_token(request)
+    if not token:
+        return None
+    sess = (
+        db.query(models.AuthSession)
+        .filter(models.AuthSession.token == token)
+        .first()
+    )
+    if not sess:
+        return None
+    if sess.expires_at is not None and sess.expires_at <= datetime.utcnow():
+        db.delete(sess)  # протухшая сессия недействительна — убираем сразу
+        db.commit()
+        return None
+    return db.get(models.User, sess.user_id)
+
+
 def _require_access(db: Session, user_id: int, request: Request) -> models.User:
     """
-    Контроль доступа к персональным данным. Зарегистрированный пользователь
-    предъявляет токен сессии из Authorization: Bearer — знание числового id
-    или guestId чужого аккаунта не даёт доступ к его профилю, свайпам и Matches.
+    Контроль доступа к персональным данным. Два способа подтвердить, что ты —
+    этот пользователь:
 
-    Гость «входит» своим секретом — guestId. Раньше гостевые ручки были открыты
-    по одному числовому id: перебирая id, можно было прочитать чужой профиль
-    (вместе с guestId из ответа), изменить его или привязать свой email через
-    /users/{id}/register. Теперь для гостя обязателен заголовок X-Guest-Token
-    с его же guestId — фронтенд шлёт его во всех запросах (см. apiRequest).
+    1. Валидная серверная сессия из Authorization: Bearer. Работает для
+       ЛЮБОГО пользователя — зарегистрированного и «гостя с соцвходом».
+       Раньше соцвход создавал пользователя с is_guest=True, но фронт после
+       входа переставал слать X-Guest-Token (оставался только Bearer) — и
+       backend отвечал 401 на каждый запрос профиля. Теперь Bearer-сессия
+       достаточно: гостевой статус и способ входа разделены.
+    2. Гостевой секрет: заголовок X-Guest-Token с guestId самого гостя.
+       Знание числового id или чужого guestId доступ не даёт.
+
+    Сессии живут 30 дней (expires_at) и отзываются все сразу через
+    DELETE /users/{id}/sessions.
     """
+    user = _session_user(db, request)
+    if user is not None and user.id == user_id:
+        return user
     user = db.get(models.User, user_id)
     if not user:
         raise HTTPException(404, "User not found")
     if not user.is_guest:
-        token = _bearer_token(request)
-        sess = (
-            db.query(models.AuthSession)
-            .filter(models.AuthSession.token == token, models.AuthSession.user_id == user_id)
-            .first()
-        ) if token else None
-        if not sess:
-            raise HTTPException(401, "Нужно войти заново")
-    else:
-        presented = _guest_token(request)
-        # compare_digest не принимает не-ASCII строки: кодируем в байты,
-        # чтобы кривой заголовок давал 401, а не 500.
-        try:
-            ok = secrets.compare_digest(
-                presented.encode("utf-8"), (user.guest_token or "").encode("utf-8")
-            )
-        except Exception:
-            ok = False
-        if not presented or not ok:
-            raise HTTPException(401, "Нужно войти заново")
+        raise HTTPException(401, "Нужно войти заново")
+    presented = _guest_token(request)
+    # compare_digest не принимает не-ASCII строки: кодируем в байты,
+    # чтобы кривой заголовок давал 401, а не 500.
+    try:
+        ok = secrets.compare_digest(
+            presented.encode("utf-8"), (user.guest_token or "").encode("utf-8")
+        )
+    except Exception:
+        ok = False
+    if not presented or not ok:
+        raise HTTPException(401, "Нужно войти заново")
     return user
 
 
@@ -174,6 +174,7 @@ def _profile_from_user(user: models.User) -> schemas.Profile:
         gpa=gpa,
         tests=schemas.Tests.model_validate(user.tests or {}),
         major=user.major,
+        majors=_list_from_db(user.majors) if user.majors else ([user.major] if user.major else []),
         degree_level=user.degree_level,
         size=_list_from_db(user.size),
         setting=_list_from_db(user.setting),
@@ -191,7 +192,13 @@ def _profile_from_user(user: models.User) -> schemas.Profile:
 def _apply_profile_to_user(user: models.User, profile: schemas.Profile) -> None:
     user.gpa = profile.gpa
     user.tests = profile.tests.model_dump()
-    user.major = profile.major
+    # Мультивыбор специальностей: majors — полный список, major — первая
+    # выбранная (обратная совместимость клиентов, которые знают только major).
+    majors = [m for m in (profile.majors or []) if isinstance(m, str) and m.strip()]
+    if not majors and profile.major:
+        majors = [profile.major]
+    user.majors = majors or None
+    user.major = majors[0] if majors else profile.major
     user.degree_level = profile.degree_level
     user.size = _db_from_list(profile.size)
     user.setting = _db_from_list(profile.setting)
@@ -373,19 +380,52 @@ def auth_register(payload: schemas.AuthRegister, db: Session = Depends(get_db)):
     return _user_out(user, session_token=token)
 
 
+# ---------------------------------------------------------------- rate limiting (login)
+# Защита от перебора паролей: до LOGIN_MAX_FAILURES неудачных попыток за
+# LOGIN_WINDOW_SECONDS с одного источника (IP) по одному email. Счётчики в
+# памяти процесса — для одного инстанса на Render этого достаточно; при
+# горизонтальном масштабировании переносим в Redis/таблицу.
+LOGIN_MAX_FAILURES = 10
+LOGIN_WINDOW_SECONDS = 15 * 60
+_login_failures: dict = defaultdict(list)  # key: (ip, email) -> [timestamps]
+
+
+def _client_ip(request: Request) -> str:
+    # Render проксирует запросы: реальный адрес клиента в X-Forwarded-For.
+    fwd = request.headers.get("x-forwarded-for", "") if request else ""
+    return (fwd.split(",")[0].strip() or (request.client.host if request and request.client else "unknown"))
+
+
+def _login_blocked(request: Request, email: str) -> bool:
+    now = time.monotonic()
+    key = (_client_ip(request), email)
+    recent = [ts for ts in _login_failures[key] if now - ts < LOGIN_WINDOW_SECONDS]
+    _login_failures[key] = recent
+    return len(recent) >= LOGIN_MAX_FAILURES
+
+
+def _record_login_failure(request: Request, email: str) -> None:
+    _login_failures[(_client_ip(request), email)].append(time.monotonic())
+
+
 @app.post("/auth/login", response_model=schemas.UserOut)
-def auth_login(payload: schemas.AuthLogin, db: Session = Depends(get_db)):
+def auth_login(payload: schemas.AuthLogin, db: Session = Depends(get_db), request: Request = None):
     """
     Вход по email+паролю → UserOut. Фронт (submitAuthForm) дальше зовёт
     GET /users/{id} и грузит сессию как после создания пользователя.
+    Защита от перебора: после 10 неудачных попыток за 15 минут с одного
+    источника по этому email — 429 без подсказки, что угадано.
     """
     email = _normalize_email(payload.email)
+    if _login_blocked(request, email):
+        raise HTTPException(429, "Слишком много попыток входа — попробуй позже")
     user = db.query(models.User).filter(models.User.email == email).first()
     if (
         not user
         or not user.password_hash
         or not auth.verify_password(payload.password, user.password_hash)
     ):
+        _record_login_failure(request, email)
         # Одна и та же ошибка и на «нет такого email», и на «неверный пароль» —
         # не раскрываем, существует ли аккаунт.
         raise HTTPException(401, "Неверный email или пароль")
@@ -403,6 +443,17 @@ def auth_logout(db: Session = Depends(get_db), request: Request = None):
         db.query(models.AuthSession).filter(models.AuthSession.token == token).delete()
         db.commit()
     return {"ok": True}
+
+
+@app.delete("/users/{user_id}/sessions")
+def revoke_all_sessions(user_id: int, db: Session = Depends(get_db), request: Request = None):
+    """Отзывает ВСЕ сессии пользователя (выход со всех устройств) — например,
+    при подозрении на утечку токена. Требует владения аккаунтом: гость —
+    своим guestId, вошедший — действующей сессией (она тоже будет удалена)."""
+    _require_access(db, user_id, request)
+    deleted = db.query(models.AuthSession).filter(models.AuthSession.user_id == user_id).delete()
+    db.commit()
+    return {"ok": True, "deleted": deleted}
 
 
 @app.post("/auth/social", response_model=schemas.UserOut)
@@ -465,8 +516,13 @@ def auth_social(payload: schemas.SocialLogin, db: Session = Depends(get_db)):
 
     if email and not user.email:
         user.email = email
-    if not user.email:
-        user.is_guest = True  # email-регистрации не было — остаётся «гость с привязкой»
+    # Регистрационный статус отделён от способа входа: провайдер подтвердил
+    # email — аккаунт считается зарегистрированным (isRegistered=true на
+    # фронте). Telegram email не даёт — такой пользователь остаётся «гостём
+    # с соцвходом», НО с серверной сессией: _require_access пускает по
+    # Bearer-токену независимо от гостевого статуса, поэтому профиль,
+    # свайпы и Matches работают без X-Guest-Token.
+    user.is_guest = not bool(user.email)
     if payload.lang in ("ru", "en"):
         user.lang = payload.lang
 
@@ -550,14 +606,29 @@ def why_this_university(uni_id: int, user_id: int, db: Session = Depends(get_db)
 # ---------------------------------------------------------------- swipes
 @app.post("/users/{user_id}/swipes")
 def record_swipe(user_id: int, payload: schemas.SwipeCreate, db: Session = Depends(get_db), request: Request = None):
-    """Записывает Like/Dislike — implicit feedback для фазы 2 (ML)."""
+    """
+    Записывает Like/Dislike — ТЕКУЩЕЕ решение пользователя по вузу (implicit
+    feedback для фазы 2 (ML) — не событие истории). Пара (user, university)
+    уникальна: повторный свайп обновляет liked (upsert), поэтому like →
+    dislike честно убирает вуз из Matches, а история не раздувается дублями.
+    """
     user = _require_access(db, user_id, request)
     uni = db.get(models.University, payload.university_id)
     if not uni:
         raise HTTPException(404, "University not found")
 
-    swipe = models.Swipe(user_id=user_id, university_id=payload.university_id, liked=payload.liked)
-    db.add(swipe)
+    swipe = (
+        db.query(models.Swipe)
+        .filter(
+            models.Swipe.user_id == user_id,
+            models.Swipe.university_id == payload.university_id,
+        )
+        .first()
+    )
+    if swipe:
+        swipe.liked = payload.liked
+    else:
+        db.add(models.Swipe(user_id=user_id, university_id=payload.university_id, liked=payload.liked))
     db.commit()
     return {"status": "recorded"}
 
@@ -671,14 +742,70 @@ def payments_checkout(user_id: int, db: Session = Depends(get_db), request: Requ
         raise HTTPException(502, f"Stripe вернул ошибку: {e}")
 
 
+def _stripe_event_user(db: Session, stripe, etype: str, obj: dict):
+    """Ищет пользователя Admitly по событию Stripe. Порядок:
+    1. user_id в metadata объекта / client_reference_id (checkout);
+    2. сохранённая связь entitlement.stripe_subscription_id == id подписки;
+    3. метаданные самой подписки (subscription_data.metadata.user_id) —
+       дергаем подписку из Stripe только если первые два не сработали.
+    None — событие к нам не относится (например, чужая подписка)."""
+    meta = obj.get("metadata") or {}
+    user_id_raw = obj.get("client_reference_id") or meta.get("user_id")
+    if user_id_raw:
+        try:
+            return db.get(models.User, int(user_id_raw))
+        except (TypeError, ValueError):
+            pass
+    sub_id = obj.get("subscription") or (obj.get("id") if etype.startswith("customer.subscription.") else None)
+    if sub_id:
+        ent = (
+            db.query(models.Entitlement)
+            .filter(models.Entitlement.stripe_subscription_id == sub_id)
+            .first()
+        )
+        if ent:
+            return db.get(models.User, ent.user_id)
+        try:
+            sub = stripe.Subscription.retrieve(sub_id)
+            uid = (sub.get("metadata") or {}).get("user_id")
+            if uid:
+                return db.get(models.User, int(uid))
+        except Exception:
+            pass  # не смогли подтянуть подписку — событие обработает retry Stripe
+    return None
+
+
+def _stripe_period_end(obj: dict):
+    """Конец оплаченного периода из объекта invoice: либо period_end самого
+    инвойса, либо период первой строки (lines.data[0].period.end)."""
+    for key in ("period_end", "current_period_end"):
+        if obj.get(key):
+            return datetime.utcfromtimestamp(int(obj[key]))
+    line = ((obj.get("lines") or {}).get("data") or [{}])[0]
+    period = (line or {}).get("period") or {}
+    if period.get("end"):
+        return datetime.utcfromtimestamp(int(period["end"]))
+    return None
+
+
 @app.post("/payments/webhook")
 async def payments_webhook(request: Request, db: Session = Depends(get_db)):
     """Вебхук Stripe. Подпись проверяется секретом STRIPE_WEBHOOK_SECRET —
-    подделать событие извне нельзя. События:
-      checkout.session.completed      -> premium до конца оплаченного периода
-      customer.subscription.deleted   -> план обратно free
-      invoice.payment_failed          -> план обратно free
-    Идемпотентно: повторный вебхук просто переустановит то же состояние."""
+    подделать событие извне нельзя. Полный цикл подписки:
+
+      checkout.session.completed       -> premium до конца периода, сохраняем
+                                          customer_id/subscription_id
+      invoice.paid / payment_succeeded -> продление: active_until из периода
+                                          инвойса
+      customer.subscription.updated    -> синхронизация срока подписки
+      customer.subscription.deleted    -> план обратно free
+      invoice.payment_failed           -> план обратно free
+
+    Идемпотентность: обработанные event.id хранятся в stripe_events —
+    повторная доставка события игнорируется (раньше повтор checkout-вебхука
+    мог пересчитать active_until «30 дней от сейчас» и сдвигать дату).
+    Ошибка запроса к Stripe (retrieve подписки) — 502, чтобы Stripe
+    доставил событие повторно, а не молча выдавал премный наугад."""
     if not payments.configured():
         raise HTTPException(503, "Оплата не подключена")
     body = await request.body()
@@ -692,35 +819,68 @@ async def payments_webhook(request: Request, db: Session = Depends(get_db)):
 
     etype = event.get("type", "")
     obj = event.get("data", {}).get("object", {})
-    user_id_raw = obj.get("client_reference_id") or (obj.get("metadata", {}) or {}).get("user_id")
-    if not user_id_raw:
-        return {"ok": True, "note": "no user_id in event"}
-    user = db.get(models.User, int(user_id_raw))
+    event_id = event.get("id") or ""
+
+    if event_id and db.get(models.StripeEvent, event_id):
+        return {"ok": True, "note": "duplicate event"}
+    try:
+        if event_id:
+            db.add(models.StripeEvent(event_id=event_id, event_type=etype))
+    except Exception:
+        pass
+
+    user = _stripe_event_user(db, stripe, etype, obj)
     if not user:
-        return {"ok": True, "note": "user not found"}
+        db.commit()
+        return {"ok": True, "note": "no matching user"}
 
     if user.entitlement is None:
         user.entitlement = models.Entitlement(plan="free")
 
     if etype == "checkout.session.completed":
-        # Для подписки берём конец периода из самой подписки (вебхук отдаёт
-        # только id) — одним запросом к Stripe.
         active_until = None
         sub_id = obj.get("subscription")
         if sub_id:
             try:
                 sub = stripe.Subscription.retrieve(sub_id)
-                if sub.get("current_period_end"):
-                    active_until = datetime.utcfromtimestamp(int(sub["current_period_end"]))
-            except Exception:
-                pass
+            except Exception as e:
+                # Не смогли прочитать подписку — пусть Stripe доставит
+                # событие заново, вместо гадания о сроке.
+                raise HTTPException(502, f"Stripe retrieve failed: {e}")
+            if sub.get("current_period_end"):
+                active_until = datetime.utcfromtimestamp(int(sub["current_period_end"]))
+            user.entitlement.stripe_subscription_id = sub_id
+            user.entitlement.stripe_customer_id = obj.get("customer") or sub.get("customer")
         if active_until is None:
-            active_until = payments.period_end_from_event(event)
+            active_until = _stripe_period_end(obj) or payments.period_end_from_event(event)
+        if active_until is None:
+            raise HTTPException(502, "Не удалось определить оплаченный период")
         user.entitlement.plan = "premium"
         user.entitlement.active_until = active_until
+    elif etype in ("invoice.paid", "invoice.payment_succeeded"):
+        # Продление подписки: срок — из периода инвойса, пользователь —
+        # по сохранённой подписке (user_id в checkout-метаданных мог
+        # уже не прийти с этим событием).
+        period_end = _stripe_period_end(obj)
+        if period_end:
+            user.entitlement.plan = "premium"
+            user.entitlement.active_until = period_end
+    elif etype == "customer.subscription.updated":
+        if user.entitlement.stripe_subscription_id is None and obj.get("id"):
+            user.entitlement.stripe_subscription_id = obj["id"]
+        status = obj.get("status")
+        if status in ("active", "trialing"):
+            user.entitlement.plan = "premium"
+            if obj.get("current_period_end"):
+                user.entitlement.active_until = datetime.utcfromtimestamp(int(obj["current_period_end"]))
+        elif status in ("canceled", "unpaid", "past_due", "incomplete_expired"):
+            user.entitlement.plan = "free"
+            user.entitlement.active_until = None
     elif etype in ("customer.subscription.deleted", "invoice.payment_failed"):
         user.entitlement.plan = "free"
         user.entitlement.active_until = None
+        if etype == "customer.subscription.deleted":
+            user.entitlement.stripe_subscription_id = None
 
     db.commit()
     return {"ok": True}
@@ -751,9 +911,19 @@ def _masked_owner(user: models.User) -> str:
 
 @app.post("/users/{user_id}/share")
 def create_share_link(user_id: int, db: Session = Depends(get_db), request: Request = None):
-    """Выдаёт токен ссылки «только для чтения». Повторный вызов возвращает тот же
-    токен (ссылка одна на аккаунт). Требует входа: чужой не сможет создать ссылку."""
+    """
+    Выдаёт токен ссылки «только для чтения». Повторный вызов возвращает тот же
+    токен (ссылка одна на аккаунт).
+
+    Платная фича: создание ссылки требует АКТИВНОГО Premium (единый
+    entitlement-механизм, 402 — фронт покажет paywall). Политика существующих
+    ссылок: после окончания подписки ранее созданная ссылка продолжает
+    работать (только для чтения) — родитель не теряет доступ внезапно;
+    отзыв — DELETE /users/{id}/share в любой момент.
+    """
     user = _require_access(db, user_id, request)
+    if not entitlements.is_premium(user):
+        raise HTTPException(402, "Доступ для родителя — функция Premium")
     existing = db.query(models.ShareLink).filter(models.ShareLink.user_id == user.id).first()
     if existing:
         return {"token": existing.token}

@@ -16,16 +16,22 @@
 
 Поток:
   1. POST /payments/checkout-session (требует входа) -> {url} — Stripe-hosted
-     страница оплаты. Фронт делает location.href = url.
+     страница оплаты. Фронт делает location.href = url. user_id кладётся и в
+     client_reference_id сессии, и в subscription_data.metadata — тогда
+     события ПРОДЛЕНИЯ (invoice.paid) находят пользователя по самой подписке,
+     даже если в событии нет метаданных чекаута.
   2. Stripe присылает вебхук POST /payments/webhook:
        checkout.session.completed       -> Entitlement.plan = premium,
-                                           active_until = конец периода
+                                           active_until = конец периода,
+                                           сохраняются customer/subscription id
+       invoice.paid / payment_succeeded -> продление: active_until из периода
+       customer.subscription.updated    -> синхронизация срока/статуса
        customer.subscription.deleted    -> plan = free (подписка отменена)
        invoice.payment_failed           -> plan = free (оплата не прошла)
   3. Отмена подписки в любой момент: у пользователя план возвращается в free.
 """
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 PROVIDER = "stripe"
 
@@ -69,8 +75,12 @@ def create_checkout_session(user_id: int, email: str = None) -> dict:
         "cancel_url": f"{frontend}/?payment=cancel",
         # client_reference_id связывает сессию с пользователем Admitly: вебхук
         # по нему находит user и включает премиум. metadata дублирует то же.
+        # subscription_data.metadata нужен ДЛЯ ПОДПИСКИ: события продления
+        # (invoice.paid, customer.subscription.*) приходят без метаданных
+        # чекаута — без этого поля вебхук не нашёл бы пользователя.
         "client_reference_id": str(user_id),
         "metadata": {"user_id": str(user_id)},
+        "subscription_data": {"metadata": {"user_id": str(user_id)}},
     }
     if email:
         params["customer_email"] = email
@@ -78,11 +88,13 @@ def create_checkout_session(user_id: int, email: str = None) -> dict:
     return {"url": session.url, "session_id": session.id}
 
 
-def period_end_from_event(event: dict) -> datetime:
+def period_end_from_event(event: dict) -> datetime | None:
     """Конец оплаченного периода из события Stripe — для active_until.
 
-    Для подписок берём current_period_end из объекта subscription (если
-    событие его несёт), иначе — консервативные 30 дней от сейчас."""
+    Возвращает None, если событие не несёт данных о периоде: вызывающий
+    (main.py) обязан тогда ответить 5xx, чтобы Stripe доставил событие
+    повторно. Раньше здесь был фолбэк «+30 дней от сейчас» — при повторной
+    доставке события он СДВИГАЛ дату окончания подписки вперёд."""
     obj = event.get("data", {}).get("object", {})
     # checkout.session.completed с subscription: подтягиваем подписку отдельно
     # вызовом API (вебхук отдаёт только id) — делаем это в main.py, здесь
@@ -90,4 +102,4 @@ def period_end_from_event(event: dict) -> datetime:
     for key in ("current_period_end", "period_end"):
         if obj.get(key):
             return datetime.utcfromtimestamp(int(obj[key]))
-    return datetime.utcnow() + timedelta(days=30)
+    return None

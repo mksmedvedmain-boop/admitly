@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, JSON, DateTime
+from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, JSON, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from copy import deepcopy
 from database import Base
@@ -44,6 +44,9 @@ class User(Base):
     # SAT, ACT и IELTS независимо (profile.tests.{SAT,ACT,IELTS}.{taken,score}).
     tests = Column(JSON, default=lambda: deepcopy(DEFAULT_TESTS))
     major = Column(String, default="Computer Science")  # свободная строка; список категорий — MAJOR_CATEGORIES на фронте
+    # Мультивыбор специальностей с онбординга (profile.majors на фронте).
+    # major остаётся первой выбранной — обратная совместимость старых клиентов.
+    majors = Column(JSON, default=list)
     degree_level = Column(String, default="bachelor")  # "bachelor" | "master" | "phd"
 
     # Предпочтения (onboarding, шаг "Preferences")
@@ -88,6 +91,20 @@ class University(Base):
     research = Column(Integer)         # 1-5
     cs = Column(Integer)               # 0-100, сила CS-программы (сознательно единственная
                                         # оцениваемая специальность в MVP — см. README)
+
+    # Данные каталога, нужные серверному скорингу (совпадают с unidata.js на
+    # фронте): стоимость обучения/проживания отдельно, тип помощи и сила
+    # программ по 8 направлениям (порядок DIRS: cs, eng, math, biz, social,
+    # health, humanities, law). Раньше были только во фронтовом UNI_DATA, и
+    # серверный Match Score расходился с экраном пользователя.
+    tuition = Column(Integer)          # $/год за обучение
+    living = Column(Integer)           # $/год проживание
+    aid_type = Column(String)          # "full" | "gov" | "need" | "merit" | "low" | ""
+    strengths = Column(JSON, default=list)  # 8 чисел 0-100 по направлениям
+    # Языки, на которых реально ведётся обучение (["en"], ["de","en"], ...).
+    # None/[] -> фолбэк на язык страны (COUNTRY_TEACH_LANG в scoring.py).
+    teach_langs = Column(JSON, nullable=True)
+
     tags = Column(JSON, default=list)
 
     # Финансовая помощь — как вложенный aid{level,merit,note} на фронте
@@ -101,19 +118,30 @@ class University(Base):
 
 class AuthSession(Base):
     """Серверная сессия зарегистрированного пользователя: непрозрачный токен
-    (secrets.token_urlsafe), а не JWT. Выдаётся /auth/register и /auth/login,
-    удаляется /auth/logout. Персональные ручки зарегистрированных пользователей
-    требуют этот токен — знание числового id или guestId чужого аккаунта больше
-    не даёт доступ к его данным."""
+    (secrets.token_urlsafe), а не JWT. Выдаётся /auth/register и /auth/login
+    (и /auth/social — см. ниже), удаляется /auth/logout. Персональные ручки
+    зарегистрированных пользователей требуют этот токен — знание числового id
+    или guestId чужого аккаунта больше не даёт доступ к его данным.
+
+    expires_at: сессия живёт 30 дней с момента выдачи (см. _require_access) —
+    утечка токена перестаёт быть вечной проблемой. Все сессии пользователя
+    отзываются DELETE /users/{id}/sessions (например, при подозрении на
+    компрометацию)."""
     __tablename__ = "auth_sessions"
 
     token = Column(String, primary_key=True)
     user_id = Column(Integer, index=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)  # None у записей до миграции
 
 
 class Swipe(Base):
+    """Свайп = ТЕКУЩЕЕ решение пользователя по вузу, а не событие истории.
+    Пара (user_id, university_id) уникальна: повторный свайп по тому же вузу
+    обновляет liked (upsert в record_swipe), поэтому like → dislike честно
+    убирает вуз из Matches, а история не раздувается дублями."""
     __tablename__ = "swipes"
+    __table_args__ = (UniqueConstraint("user_id", "university_id"),)
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
@@ -126,15 +154,31 @@ class Swipe(Base):
 
 class Entitlement(Base):
     """Платный доступ пользователя. plan: "free" | "premium". active_until=None —
-    бессрочно. Реального биллинга нет: пока план выставляет демо-ручка
-    POST /users/{id}/entitlement (включается переменной окружения)."""
+    бессрочно (демо-ручка). План выставляется вебхуком Stripe (payments.py):
+    checkout.session.completed включает premium, invoice.paid продлевает,
+    customer.subscription.deleted / invoice.payment_failed отключают.
+    stripe_customer_id / stripe_subscription_id связывают пользователя с
+    подпиской Stripe, чтобы события продления находили своего владельца."""
     __tablename__ = "entitlements"
 
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     plan = Column(String, default="free", nullable=False)
     active_until = Column(DateTime, nullable=True)
+    stripe_customer_id = Column(String, nullable=True)
+    stripe_subscription_id = Column(String, nullable=True)
 
     user = relationship("User", back_populates="entitlement")
+
+
+class StripeEvent(Base):
+    """Обработанные события вебхука Stripe (event.id) — защита от повторов:
+    Stripe ретраит вебхуки, повторная обработка checkout/invoice не должна
+    сдвигать дату окончания подписки."""
+    __tablename__ = "stripe_events"
+
+    event_id = Column(String, primary_key=True)
+    event_type = Column(String)
+    processed_at = Column(DateTime, default=datetime.utcnow)
 
 
 class ShareLink(Base):

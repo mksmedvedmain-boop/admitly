@@ -1,0 +1,1 @@
+{"verified_at": null, "note": "verified_at — дата последней ручной сверки цен (YYYY-MM-DD). null — значит считаем по mtime universities.json. Обнови при ручной проверке каталога."}

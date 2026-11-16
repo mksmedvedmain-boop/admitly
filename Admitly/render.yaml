@@ -1,15 +1,16 @@
-# Пример для Render. Проверьте значения и подставьте свой домен фронтенда.
-# Код бэкенда лежит в backend/, поэтому указан rootDir.
+# Render Blueprints для деплоя Admitly.
+# Репозиторий: https://github.com/mksmedvedmain-boop/admitly
+# Корень репозитория — папка Admitly/, поэтому rootDir = Admitly/backend.
 services:
   - type: web
     name: admitly-api
     runtime: python
-    rootDir: backend
+    rootDir: Admitly/backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: ADMITLY_CORS_ORIGINS
-        value: https://your-frontend-domain.example
+        value: https://admitly-yxgk.onrender.com
       - key: DATABASE_URL
         sync: false   # строка Postgres из панели Render; без неё данные SQLite пропадают при перезапуске

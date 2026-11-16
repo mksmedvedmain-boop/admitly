@@ -70,6 +70,9 @@ class Profile(CamelModel):
     gpa: float = Field(default=3.6, ge=2.0, le=4.0)
     tests: Tests = Field(default_factory=Tests)
     major: str = "Computer Science"
+    # Мультивыбор специальностей с онбординга. major остаётся первой выбранной
+    # (старые клиенты читают только его), majors — полный список.
+    majors: List[str] = []
     degree_level: Literal["bachelor", "master", "phd"] = "bachelor"
     size: List[str] = []
     setting: List[str] = []

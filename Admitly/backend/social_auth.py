@@ -7,14 +7,15 @@
 его у провайдера, и связка хранится в таблице social_accounts БД.
 
 Проверки:
-  Google   — id_token (JWT) валидируется эндпоинтом Google
-             oauth2.googleapis.com/tokeninfo (Google сам проверяет подпись;
-             мы дополнительно сверяем издателя и срок).
+  Google   — access_token дергает официальный userinfo.googleapis.com
+             (Google сам валидирует токен; email берём только если
+             email_verified=true — иначе автопривязки по email не будет).
   Яндекс   — access_token дергает login.yandex.ru/info (официальный способ
              из документации Яндекс ID).
   Telegram — Login Widget присылает data с полем hash: HMAC-SHA256 от
              data_check_string с секретом = sha256(токен бота). Проверяем
-             сами (токен бота в env TELEGRAM_BOT_TOKEN, на фронт не отдаётся).
+             сами (токен бота в env TELEGRAM_BOT_TOKEN, на фронт не отдаётся)
+             плюс свежесть auth_date (не старше 24 часов, не «из будущего»).
 
 Зависимости — только stdlib (urllib), чтобы не тянуть SDK ради двух запросов.
 """
@@ -22,10 +23,18 @@ import hashlib
 import hmac
 import json
 import os
+import time
 import urllib.parse
 import urllib.request
 
 TIMEOUT = 10  # секунд на запрос к провайдеру
+
+# Свежесть Telegram Login Widget: auth_date не старше 24 часов, будущее —
+# не дальше 5 минут (поправка на рассинхрон часов). Без этой проверки
+# корректно подписанный payload 1970 года принимался бы бесконечно —
+# это replay-вектор (R05 технического ревью от 14.11.2026).
+TELEGRAM_AUTH_MAX_AGE = 24 * 60 * 60
+TELEGRAM_CLOCK_SKEW = 5 * 60
 
 
 class SocialVerifyError(Exception):
@@ -59,9 +68,17 @@ def verify_google(access_token: str) -> dict:
     sub = info.get("sub") or info.get("id")
     if not sub:
         raise SocialVerifyError("Токен Google недействителен")
+    # Автопривязка email к существующему аккаунту — только для ПОДТВЕРЖДЁННОГО
+    # Google адреса. Неподтверждённый email провайдер может отдавать по
+    # разным причинам; считать его доказательством владения аккаунтом
+    # нельзя. email_verified приходит как bool или строка "true"/"false".
+    email = info.get("email") or None
+    verified = info.get("email_verified")
+    if email and not (verified is True or (isinstance(verified, str) and verified.lower() == "true")):
+        email = None
     return {
         "provider_user_id": str(sub),
-        "email": info.get("email") or None,
+        "email": email,
     }
 
 
@@ -110,6 +127,21 @@ def verify_telegram(data: dict, bot_token: str) -> dict:
     expected = hmac.new(secret_key, dcs.encode("utf-8"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(received_hash, expected):
         raise SocialVerifyError("Подпись Telegram не совпала — данные подделаны или повреждены")
+
+    # Свежесть payload: подпись защищает от подделки, но НЕ от повтора —
+    # старый валидный payload можно слать бесконечно. auth_date (unix-время
+    # авторизации) не должен быть старше 24 часов и «из будущего» дальше
+    # TELEGRAM_CLOCK_SKEW секунд.
+    try:
+        auth_date = int(data["auth_date"])
+    except (KeyError, TypeError, ValueError):
+        raise SocialVerifyError("В ответе Telegram нет времени авторизации (auth_date)")
+    now = int(time.time())
+    if now - auth_date > TELEGRAM_AUTH_MAX_AGE:
+        raise SocialVerifyError("Данные входа Telegram устарели — войди заново")
+    if auth_date - now > TELEGRAM_CLOCK_SKEW:
+        raise SocialVerifyError("Время авторизации Telegram в будущем — проверь часы устройства")
+
     return {
         "provider_user_id": str(data["id"]),
         "email": None,  # Telegram email не даёт

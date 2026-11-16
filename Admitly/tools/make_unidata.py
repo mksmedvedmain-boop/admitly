@@ -26,6 +26,7 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "backend", "data", "universities.json")
+META = os.path.join(ROOT, "backend", "data", "catalog_meta.json")
 DST = os.path.join(ROOT, "frontend", "unidata.js")
 
 FIELDS = ("name", "city", "country", "continent", "cost", "acceptance",
@@ -53,7 +54,7 @@ def main():
             "aid": {"level": u["aid_level"], "merit": u["aid_merit"], "note": u["aid_note"]},
         })
         extra[uid] = {"website": u.get("website", ""), "desc": u.get("desc_en", ""),
-                     "desc_ru": u.get("desc_ru", "")}
+                     "desc_ru": u.get("desc_ru", ""), "teach_langs": u.get("teach_langs", [])}
         desc_ru[uid] = u.get("desc_ru", "")
         facts[uid] = {"founded": u.get("founded"), "students": u.get("students"),
                      "type": u.get("type"), "wiki": u.get("wiki"), "wiki_ru": u.get("wiki_ru")}
@@ -76,13 +77,25 @@ def main():
         if u["country"] not in countries[u["continent"]]:
             countries[u["continent"]].append(u["country"])
 
+    # Дата «каталог обновлён»: если задан backend/data/catalog_meta.json
+    # {"verified_at": "YYYY-MM-DD"} — это дата последней ручной сверки цен;
+    # иначе берём mtime исходного JSON (дата изменения данных).
+    updated = None
+    try:
+        with open(META, encoding="utf-8") as f:
+            updated = json.load(f).get("verified_at")
+    except Exception:
+        pass
+    if not updated:
+        updated = datetime.date.fromtimestamp(os.path.getmtime(SRC)).isoformat()
+
     js = (
         "/* Сгенерировано tools/make_unidata.py из backend/data/universities.json.\n"
         "   Не редактировать руками — правь universities.json и перегенерируй:\n"
         "   python3 tools/make_unidata.py */\n\n"
-        # Дата последнего изменения данных каталога (mtime исходного JSON) —
-        # фронт показывает бейдж «Цены проверены: …» (см. catalogUpdatedLabel).
-        "const CATALOG_UPDATED = " + json.dumps(datetime.date.fromtimestamp(os.path.getmtime(SRC)).isoformat()) + ";\n\n"
+        # Дата последнего изменения/сверки данных каталога — фронт показывает
+        # бейдж «Каталог обновлён: …» (см. catalogUpdatedLabel).
+        "const CATALOG_UPDATED = " + json.dumps(updated) + ";\n\n"
         "const UNIVERSITIES = " + json.dumps(unis, ensure_ascii=False, separators=(",", ":")) + ";\n\n"
         "const UNI_EXTRA = " + json.dumps(extra, ensure_ascii=False, separators=(",", ":")) + ";\n\n"
         "const UNI_DESC_RU = " + json.dumps(desc_ru, ensure_ascii=False, separators=(",", ":")) + ";\n\n"

@@ -3,7 +3,7 @@
 
 Каталог собран из открытых источников: College Scorecard (США: приём, SAT,
 стоимость), Wikipedia/Wikidata (годы основания, ссылки), сайты вузов. Для вузов
-вне США GPA/SAT и стоимость — ориентировочные оценки (см. README_backend.md).
+вне США GPA/SAT и стоимость — ориентировочные оценки (см. README.md).
 
 Загрузка идёт как upsert по id: повторный запуск обновляет цифры существующих
 вузов и добавляет новые, свайпы и пользователи не трогаются. Id 200 был дублем
@@ -26,7 +26,26 @@ FIELDS = (
     "name", "city", "country", "continent", "cost", "acceptance",
     "gpa25", "gpa75", "sat25", "sat75", "size", "setting", "climate",
     "research", "cs", "tags", "aid_level", "aid_merit", "aid_note",
+    # Данные серверного скоринга (совпадают с unidata.js): tuition/living
+    # отдельно, тип помощи, сила программ по 8 направлениям и языки обучения.
+    "tuition", "living", "aid_type", "strengths", "teach_langs",
 )
+
+
+def _aid_type(row: dict) -> str:
+    """aid в universities.json — это и есть тип помощи (full/gov/need/merit/
+    low). Отдельная колонка называется aid_type, чтобы не путать с
+    aid_level (High/Medium/Low) из старой схемы."""
+    return row.get("aid") or ""
+
+
+def _prep_row(row: dict) -> dict:
+    row = dict(row)
+    row["aid_type"] = _aid_type(row)
+    # teach_langs отсутствует у большинства записей — None (фолбэк на язык
+    # страны в scoring.language_fit), а не пустой список.
+    row["teach_langs"] = row.get("teach_langs") or None
+    return row
 
 
 def load_universities():
@@ -54,8 +73,9 @@ def seed():
         # 2. Upsert по id.
         added = updated = 0
         for row in rows:
+            row = _prep_row(row)
             uni = db.get(models.University, row["id"])
-            values = {k: row[k] for k in FIELDS}
+            values = {k: row.get(k) for k in FIELDS}
             if uni is None:
                 db.add(models.University(id=row["id"], **values))
                 added += 1

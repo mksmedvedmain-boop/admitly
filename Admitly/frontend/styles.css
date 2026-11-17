@@ -44,6 +44,10 @@
      Unbounded — крупные заголовки и числа. Unbounded заметно шире, поэтому
      в заголовках он идёт меньшим кеглем. */
   --font-title: 'Unbounded', var(--font-display);
+  /* Шрифт числовых значений: GPA, баллы тестов, бюджет, скоринги. Space Grotesk
+     геометрически близок к Onest, но у него более характерные, «продуктовые»
+     цифры — значения в слайдерах перестают выглядеть как обычный текст. */
+  --font-num: 'Space Grotesk', var(--font-display);
   /* Моно-шрифт убран: цифры выглядели «как из терминала». Токен оставлен, чтобы
      не править ~30 мест, но теперь это основной шрифт с ровными цифрами. */
   --font-mono: var(--font-body);
@@ -4493,8 +4497,7 @@ html:not([data-theme="dark"]) .lp-footer::before {
   background: radial-gradient(ellipse 120% 60% at 50% 0%, #101d38 0%, #080f22 45%, #030509 100%);
 }
 
-/* Восстановлена исходная фиолетовая туманность rgba(90,70,140,.1) —
-   в прошлом ревью заменял на тёплый оливковый, пользователь не просил. */
+/* Фиолетовая туманность фона ночной сцены. */
 .lp-bg-fx-night .nebula {
   position: absolute;
   width: 900px;
@@ -4528,8 +4531,7 @@ html:not([data-theme="dark"]) .lp-footer::before {
    явление, но дальше по глубине сцены (правило перспективы: дальний
    объект движется на меньшее расстояние и медленнее ближнего — see
    heroCometsMarkup в app.js). */
-/* Восстановлены исходные сине-фиолетовые облака rgba(180,190,220) —
-   в прошлом ревью заменял на тёплый серо-оливковый, пользователь не просил. */
+/* Сине-фиолетовые облака ночной сцены. */
 .lp-bg-fx-night .cloud {
   position: absolute;
   /* Координата через custom-свойство из heroNightCloudsMarkup
@@ -4625,8 +4627,7 @@ html:not([data-theme="dark"]) .lp-footer::before {
    каждая на своей большой задержке, чтобы не мельтешили одновременно. */
 /* Мягкая, едва заметная пульсация зарева — не "мигание", а очень медленный
    вдох-выдох (14s), под настроение "задумчиво, спокойно", а не "аларм". */
-/* Восстановлен исходный horizon-glow (высота 40%, фиолетово-золотой) —
-   в прошлом ревью приглушал до 24%/тёплого песочного, пользователь не просил. */
+/* Зарево над горизонтом: высота 40%, фиолетово-золотой. */
 .lp-bg-fx-night .horizon-glow {
   position: absolute;
   left: 0;
@@ -7200,9 +7201,7 @@ html[data-theme="dark"] .lp-cta-box .lp-btn-primary {
 }
  
 /* --- Footer --- */
-/* Восстановлен исходный футер тёмной темы (var(--brand-surface-2))
-   и исходная цветная полоса — в прошлом ревью приглушал/удалял,
-   пользователь не просил («верни как было»). */
+/* Футер тёмной темы (var(--brand-surface-2)) с цветной полосой. */
 .lp-footer {
   position: relative;
   border-top: 1px solid var(--brand-border);
@@ -9010,21 +9009,26 @@ html[data-theme="dark"] .undo-btn:hover:not(:disabled) {
 }
 #lp-why { padding-bottom: 96px; }
 
-/* --- Цифры: без моно-«терминала». Крупные значения — основной дисплейный
-   шрифт (Manrope) с ровными лайнинг-цифрами, мелкие подписи — он же. --- */
+/* --- Цифры: без моно-«терминала». Крупные значения — отдельный числовой
+   шрифт (Space Grotesk, --font-num) с ровными лайнинг-цифрами: характерные
+   цифры вместо «обычного текста». --- */
 [id^="val-"],
 .test-row-score-val,
 .match-score-block .v,
 .big-score-card .v,
 .hero-stat .v,
 .score-count {
-  font-family: var(--font-display);
+  font-family: var(--font-num);
   font-weight: 700;
   font-variant-numeric: lining-nums tabular-nums;
   font-feature-settings: "lnum" 1, "tnum" 1;
   letter-spacing: -.01em;
 }
 [id^="val-"], .test-row-score-val { font-size: 24px; line-height: 1; }
+/* Симулятор шансов: значения GPA и балла теста у ползунков — тем же числовым шрифтом */
+.sim-row label b { font-family: var(--font-num); font-weight: 700; font-variant-numeric: lining-nums tabular-nums; }
+/* Границы шкалы под слайдером GPA (2.0 / 4.0) */
+.slider-range-labels { font-family: var(--font-num); }
 .test-row-hint, .test-row-note { font-family: var(--font-body); letter-spacing: 0; font-size: 13px; }
 .badge, .hero-badge, .lp-compare-label { font-variant-numeric: tabular-nums; }
 
@@ -9075,13 +9079,20 @@ html[data-theme="dark"] .undo-btn:hover:not(:disabled) {
   -webkit-backdrop-filter: none;
 }
 html[data-theme="dark"] .map-wrap { background: transparent; border: 0; box-shadow: none; }
-.map-wrap-head { border-bottom: 1px solid color-mix(in srgb, var(--ink) 14%, transparent); }
+/* Подпись над картой центрирована: карта занимает всю ширину колонки,
+   а подпись раньше прижималась к левому краю и выглядела криво. */
+.map-wrap-head {
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  justify-content: center;
+  text-align: center;
+}
 .map-wrap-label {
   font-size: 14px;
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
   color: var(--ink-soft);
+  width: 100%;
 }
 /* карта без плашки: подписям нужен запас читаемости на любом небе */
 .continent { stroke: rgba(255, 255, 255, .85); }

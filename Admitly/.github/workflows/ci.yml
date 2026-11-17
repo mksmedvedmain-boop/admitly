@@ -1,6 +1,9 @@
 # CI: бэкенд-тесты Admitly на каждый push/PR в main.
-# Тесты — самописный фреймворк check() + unittest, запускаются напрямую
-# (python3 -m unittest их не находит: файлы не вида test_*.py в пакете).
+# Тесты двух видов:
+#   - юнит (test_scoring, test_social, test_fixes) — сервер не нужен;
+#   - интеграционные (test_auth, test_catalog, часть test_social) — нужен
+#     поднятый uvicorn на 127.0.0.1:8000, поэтому сервер стартуем в фоне
+#     и ждём /health перед прогоном.
 name: ci
 
 on:
@@ -20,8 +23,19 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      # Юнит-тесты без сервера
       - run: python3 test_scoring.py
-      - run: python3 test_social.py
+      - run: python3 -m unittest test_social
+      - run: python3 -m unittest test_fixes
+      # Сервер для интеграционных тестов (SQLite-фолбэк, демо-премиум для catalog)
+      - name: Start API server
+        run: |
+          ADMITLY_DEMO_PREMIUM=1 nohup uvicorn main:app --host 127.0.0.1 --port 8000 > server.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/health && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/health
       - run: python3 test_auth.py
       - run: python3 test_catalog.py
-      - run: python3 test_fixes.py
+      - run: python3 test_social.py

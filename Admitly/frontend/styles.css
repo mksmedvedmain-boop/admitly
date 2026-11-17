@@ -190,7 +190,10 @@ body {
   background: var(--bg);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
-  overflow-x: clip;
+  /* БЕЗ overflow-x: clip — обрезка на предке шапки ломает
+     position:sticky в iOS Safari (шапка «зависает» посреди экрана,
+     hero-текст уезжает над ней). Горизонтальное переполнение
+     обрезается на уровне html (см. html { overflow-x: clip } ниже). */
 }
 
 /* Базовая типографика (ui-ux-pro-max: базовый кегль 16px, межстрочный 1.5).
@@ -4055,7 +4058,11 @@ html[data-theme="dark"] .avatar {
   width: 100%;
   position: relative;
   isolation: isolate;
-  overflow-x: clip;
+  /* БЕЗ overflow-x: clip! В iOS Safari overflow-обрезка на предке
+     шапки ломает position:sticky (.hd): шапка «зависает» посреди
+     экрана, а hero-контент уезжает над ней под адресную строку
+     (жалоба со скриншота). Горизонтальное переполнение всё равно
+     обрезается на уровне html (overflow-x: clip на корне ниже). */
 }
 
 /* Глобальный анимированный фон на весь сайт (не только hero) — один слой
@@ -8487,7 +8494,7 @@ html[data-theme="dark"] .auth-mark {
   font-weight: 700;
   font-size: 23px;
   line-height: 1.28;
-  margin: 0 0 14px;
+  margin: 0 0 8px;
   color: var(--brand-ink);
 }
 
@@ -8508,7 +8515,7 @@ html[data-theme="dark"] .auth-mark {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .lp-feature-step i {
@@ -11115,7 +11122,7 @@ html[data-theme="dark"] .content:has(.discover-hero) { background: transparent; 
     animation: none;
   }
   /* запас снизу: закреплённая CTA-панель не должна перекрывать карточки и точки */
-  .lp-feature-stage-outer { padding-bottom: 96px; }
+  .lp-feature-stage-outer { padding-bottom: 128px; }
 
   /* ---------- Hero CTA: полновесная кнопка во всю ширину ---------- */
   .lp-hero-ctas { align-items: stretch; margin-bottom: 22px; }
@@ -11132,6 +11139,16 @@ html[data-theme="dark"] .content:has(.discover-hero) { background: transparent; 
 
   /* ---------- Фичи: горизонтальная карусель (scroll-snap) ---------- */
   #lp-how .lp-feature-stage-outer { height: auto; }
+  /* Между заголовком секции и карточками было ~50px «воздуха» —
+     жалоба: «пробелы сверху между карточками и шапкой». Прижимаем
+     заголовок к карусели. */
+  #lp-how .lp-section-head { margin-bottom: 18px; }
+  /* Дзен-минимализм лишнего поля слева/справа убран: карточка на всю
+     ширину минус 32px — следующий край всегда виден, свайп читается. */
+  .lp-feature-stage { padding: 4px 16px 8px; }
+  .lp-feature-card { flex: 0 0 calc(100% - 32px); padding: 16px; gap: 10px; }
+  /* Меньшие внутренние отступы в моке — больше контента в кадре */
+  .lp-feature-mock { padding: 10px; }
   .lp-feature-stage {
     position: static;
     /* высота — от вьюпорта, а не от контента: карточки-моки выше экрана
@@ -11231,6 +11248,11 @@ html[data-theme="dark"] .content:has(.discover-hero) { background: transparent; 
     justify-content: center;
     gap: 8px;
     padding: 10px 0 4px;
+    /* Панель «Начать бесплатно» (fixed, z-index 45) может доехать
+       до точек на низких экранах — точки остаются кликабельными СВЕРХ
+       панели: 60 > 45. */
+    position: relative;
+    z-index: 60;
   }
   /* Точка-индикатор: визуально маленькая (8px), но зона нажатия — 44px
      (минимум для пальца), сам кружок рисуется ::after внутри кнопки. */

@@ -107,7 +107,7 @@ check("GPA вне 2.0-4.0 -> 422", st == 422)
 st, v, _ = call("POST", "/users", {"guestId": "cat-val3-" + RUN, "profile": {"research": 0}})
 check("research вне 1-5 -> 422", st == 422)
 st, v, _ = call("POST", "/users", {"guestId": "cat-val4-" + RUN, "profile": {"budget": 0, "gpa": 4.0}})
-check("budget=0 (не важно) и GPA 4.0 -> 200", st == 200)
+check("нулевой бюджет и GPA 4.0 -> 200", st == 200)
 
 # партнёры
 st, pl, _ = call("GET", f"/placements/admission_reality_low_score?user_id={uid}", guest="cat-" + RUN)

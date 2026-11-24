@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 import uuid
@@ -12,6 +13,8 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 import models
 import schemas
@@ -24,6 +27,8 @@ import social_auth  # noqa: F401 — проверка токенов соцвх�
 from database import Base, engine, get_db
 import migrations
 import seed_data
+
+logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)  # новые таблицы (create_all не трогает существующие)
 migrations.apply(engine)               # версионированные изменения СХЕМЫ существующих таблиц
@@ -391,9 +396,8 @@ _login_failures: dict = defaultdict(list)  # key: (ip, email) -> [timestamps]
 
 
 def _client_ip(request: Request) -> str:
-    # Render проксирует запросы: реальный адрес клиента в X-Forwarded-For.
-    fwd = request.headers.get("x-forwarded-for", "") if request else ""
-    return (fwd.split(",")[0].strip() or (request.client.host if request and request.client else "unknown"))
+    # The ASGI server resolves forwarded headers only for trusted proxies.
+    return request.client.host if request and request.client else "unknown"
 
 
 def _login_blocked(request: Request, email: str) -> bool:
@@ -576,7 +580,7 @@ def list_universities(user_id: int, response: Response, db: Session = Depends(ge
     pool = [u for u in pool if u.id not in already_swiped]
 
     results = [_match_out(u, profile) for u in pool]
-    results.sort(key=lambda x: x.match_score, reverse=True)
+    results.sort(key=lambda x: (-x.match_score, x.id))
     return results
 
 
@@ -617,18 +621,12 @@ def record_swipe(user_id: int, payload: schemas.SwipeCreate, db: Session = Depen
     if not uni:
         raise HTTPException(404, "University not found")
 
-    swipe = (
-        db.query(models.Swipe)
-        .filter(
-            models.Swipe.user_id == user_id,
-            models.Swipe.university_id == payload.university_id,
-        )
-        .first()
-    )
-    if swipe:
-        swipe.liked = payload.liked
-    else:
-        db.add(models.Swipe(user_id=user_id, university_id=payload.university_id, liked=payload.liked))
+    insert = pg_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
+    stmt = insert(models.Swipe).values(user_id=user.id, university_id=uni.id, liked=payload.liked)
+    db.execute(stmt.on_conflict_do_update(
+        index_elements=[models.Swipe.user_id, models.Swipe.university_id],
+        set_={"liked": stmt.excluded.liked},
+    ))
     db.commit()
     return {"status": "recorded"}
 
@@ -738,8 +736,9 @@ def payments_checkout(user_id: int, db: Session = Depends(get_db), request: Requ
         return payments.create_checkout_session(user.id, user.email)
     except RuntimeError as e:
         raise HTTPException(503, str(e))
-    except Exception as e:
-        raise HTTPException(502, f"Stripe вернул ошибку: {e}")
+    except Exception:
+        logger.exception("Stripe checkout request failed")
+        raise HTTPException(502, "Не удалось открыть оплату")
 
 
 def _stripe_event_user(db: Session, stripe, etype: str, obj: dict):
@@ -767,11 +766,16 @@ def _stripe_event_user(db: Session, stripe, etype: str, obj: dict):
             return db.get(models.User, ent.user_id)
         try:
             sub = stripe.Subscription.retrieve(sub_id)
-            uid = (sub.get("metadata") or {}).get("user_id")
-            if uid:
-                return db.get(models.User, int(uid))
         except Exception:
-            pass  # не смогли подтянуть подписку — событие обработает retry Stripe
+            logger.exception("Stripe subscription lookup failed")
+            # No successful response and no committed event marker: retry may succeed.
+            raise HTTPException(502, "Не удалось проверить подписку")
+        uid = (sub.get("metadata") or {}).get("user_id")
+        if uid:
+            try:
+                return db.get(models.User, int(uid))
+            except (TypeError, ValueError):
+                return None
     return None
 
 
@@ -820,6 +824,11 @@ async def payments_webhook(request: Request, db: Session = Depends(get_db)):
     etype = event.get("type", "")
     obj = event.get("data", {}).get("object", {})
     event_id = event.get("id") or ""
+    if etype not in {
+        "checkout.session.completed", "invoice.paid", "invoice.payment_succeeded",
+        "customer.subscription.updated", "customer.subscription.deleted", "invoice.payment_failed",
+    }:
+        return {"ok": True, "note": "unhandled event type"}
 
     if event_id and db.get(models.StripeEvent, event_id):
         return {"ok": True, "note": "duplicate event"}
@@ -843,10 +852,11 @@ async def payments_webhook(request: Request, db: Session = Depends(get_db)):
         if sub_id:
             try:
                 sub = stripe.Subscription.retrieve(sub_id)
-            except Exception as e:
+            except Exception:
                 # Не смогли прочитать подписку — пусть Stripe доставит
                 # событие заново, вместо гадания о сроке.
-                raise HTTPException(502, f"Stripe retrieve failed: {e}")
+                logger.exception("Stripe checkout subscription lookup failed")
+                raise HTTPException(502, "Не удалось проверить подписку")
             if sub.get("current_period_end"):
                 active_until = datetime.utcfromtimestamp(int(sub["current_period_end"]))
             user.entitlement.stripe_subscription_id = sub_id

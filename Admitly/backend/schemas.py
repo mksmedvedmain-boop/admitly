@@ -28,7 +28,7 @@ class CamelModel(BaseModel):
 # ---------------------------------------------------------------- tests / academic profile
 class TestEntry(CamelModel):
     taken: bool = False
-    score: float = 0
+    score: float = Field(default=0, allow_inf_nan=False)
 
 
 class Tests(CamelModel):
@@ -64,7 +64,7 @@ class Profile(CamelModel):
     _list_from_db в main.py приводит её к массиву из одного элемента.
 
     Диапазоны — как у слайдеров онбординга (app.js): GPA 2.0–4.0, budget
-    0–70000 (0 = «не важно», семантику нуля не трогаем), research 1–5.
+    0–200000 (0 = нулевой бюджет), research 1–5.
     Раньше профиль принимал любой мусор: budget=-1 давал отрицательный
     cost_ratio в match_score и максимальный бюджетный балл."""
     gpa: float = Field(default=3.6, ge=2.0, le=4.0)

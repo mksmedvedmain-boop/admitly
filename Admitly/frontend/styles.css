@@ -611,12 +611,8 @@ html[data-theme="dark"] .ob-step-row.current .ob-step-dot {
   }
 
   .ob-compact .major-grid {
-    max-height: 160px;
-    margin-top: 6px !important;
-  }
-
-  .ob-compact .major-card {
-    padding: 11px 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 6px;
   }
 
   .ob-compact .category-scroll {
@@ -1061,20 +1057,18 @@ html[data-theme="dark"] .slider-val {
  
 .major-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  max-height: 230px;
-  overflow-y: auto;
-  padding: 2px 2px 2px 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 6px;
 }
- 
-.major-grid::-webkit-scrollbar {
-  width: 5px;
+
+.major-card:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
- 
-.major-grid::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 10px;
+
+@media (min-width:981px) {
+  .ob-compact .major-card:last-child:nth-child(odd) { grid-column: auto; }
+  .ob-compact .major-card:last-child:nth-child(3n + 1) { grid-column: 1 / -1; }
 }
  
 .major-card {
@@ -1084,13 +1078,15 @@ html[data-theme="dark"] .slider-val {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 64px;
-  padding: 14px 12px;
+  min-height: 52px;
+  min-width: 0;
+  padding: 10px 26px 10px 9px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-2);
   transition: border-color .15s, background .15s, transform .15s, box-shadow .15s;
-  text-align: center;
+  text-align: left;
+  align-items: flex-start;
 }
  
 .stagger-in .major-card {
@@ -1117,6 +1113,7 @@ html[data-theme="dark"] .slider-val {
   font-weight: 700;
   color: var(--ink-soft);
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
  
 .major-card.active .major-name {
@@ -1128,10 +1125,10 @@ html[data-theme="dark"] .slider-val {
    мобильном при быстром взгляде почти не читалось как "выбрано". */
 .major-card-check {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 18px;
-  height: 18px;
+  top: 6px;
+  right: 6px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--primary);
   color: var(--on-primary);
@@ -1211,12 +1208,8 @@ html[data-theme="dark"] .slider-val {
 }
  
 @media (max-width:480px) {
-  .major-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
- 
   .major-card {
-    padding: 12px 6px;
+    min-height: 49px;
   }
  
   .major-name {
@@ -5366,10 +5359,6 @@ html[data-theme="dark"] .lp-hero .lp-btn-ghost:hover {
   border-color: rgba(234, 240, 250, .55);
 }
 
-html[data-theme="dark"] .lp-hero .lp-phone-stage .lp-phone {
-  box-shadow: 0 40px 90px -30px rgba(0, 0, 0, .6);
-}
-
 .lp-hero-grid {
   position: relative;
   z-index: 1;
@@ -5878,24 +5867,21 @@ html[data-theme="dark"] .lp-hero-visual.lp-phone-stage::before {
   opacity: .55;
 }
 
-/* --- Мокап телефона: пропорции и детали настоящего iPhone ---
-   Габарит 270×552 (≈ iPhone 15 Pro, 1:2.05), титановая рамка через
-   градиент по корпусу, чёрный безель — inset-тень поверх градиента
-   (видимая часть рамки ~3px), Dynamic Island по центру, кнопки
-   громкости слева и питания справа. Наклон спокойный (6°/−9°):
-   читается как предметный кадр, а не как «3D-картинка ради 3D». */
+/* A 2px metal rail and an even black bezel around the display glass. */
 .lp-phone {
   position: relative;
   z-index: 1;
   width: 270px;
   height: 552px;
-  border-radius: 48px;
-  padding: 12px;
-  background: linear-gradient(158deg, #5A606B 0%, #2B2F36 26%, #1C1F24 52%, #32363E 78%, #5B616C 100%);
+  border-radius: 42px;
+  padding: 5px;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(#09090b, #09090b) padding-box,
+    linear-gradient(147deg, #a5aab2 0%, #484a52 23%, #787d86 41%, #2d3037 62%, #90949c 100%) border-box;
   box-shadow:
-    inset 0 0 0 9px #0B0E13,
-    inset 0 1.5px 0 rgba(255, 255, 255, .12),
-    inset 0 -1.5px 0 rgba(0, 0, 0, .4),
+    inset 0 0 0 1px #272830,
+    0 0 0 1px #171820,
     0 42px 80px -22px rgba(10, 16, 32, .38),
     0 14px 30px -14px rgba(10, 16, 32, .30);
   transform-style: preserve-3d;
@@ -5909,9 +5895,8 @@ html[data-theme="dark"] .lp-hero-visual.lp-phone-stage::before {
 /* Тень в тёмной теме — та же честная «предметная», без цветных глоу. */
 html[data-theme="dark"] .lp-phone {
   box-shadow:
-    inset 0 0 0 9px #0B0E13,
-    inset 0 1.5px 0 rgba(255, 255, 255, .10),
-    inset 0 -1.5px 0 rgba(0, 0, 0, .5),
+    inset 0 0 0 1px #272830,
+    0 0 0 1px #171820,
     0 42px 90px -22px rgba(0, 0, 0, .75),
     0 14px 30px -14px rgba(0, 0, 0, .55);
 }
@@ -5920,11 +5905,11 @@ html[data-theme="dark"] .lp-phone {
 .lp-phone::before {
   content: '';
   position: absolute;
-  right: -3px;
-  top: 168px;
+  right: -4px;
+  top: 25%;
   width: 3px;
-  height: 84px;
-  background: linear-gradient(to bottom, #4E545E, #24272D);
+  height: 12%;
+  background: linear-gradient(90deg, #393c44, #8b9098 65%, #44464e);
   border-radius: 2px;
   box-shadow: 0 0 2px rgba(0, 0, 0, .35);
 }
@@ -5932,24 +5917,25 @@ html[data-theme="dark"] .lp-phone {
 /* Кнопки громкости — слева (p1: качелька вверх, p2: вниз) */
 .lp-phone-btn {
   position: absolute;
-  left: -3px;
+  left: -4px;
   width: 3px;
-  background: linear-gradient(to bottom, #4E545E, #24272D);
+  background: linear-gradient(90deg, #44464e, #8b9098 45%, #393c44);
   border-radius: 2px;
   box-shadow: 0 0 2px rgba(0, 0, 0, .35);
   z-index: 8;
 }
-.lp-phone-btn.p1 { top: 138px; height: 56px; }
-.lp-phone-btn.p2 { top: 202px; height: 56px; }
+.lp-phone-btn.p0 { top: 17%; height: 4%; }
+.lp-phone-btn.p1 { top: 23%; height: 7%; }
+.lp-phone-btn.p2 { top: 32%; height: 7%; }
 
 /* Dynamic Island — по центру, с линзой камеры */
 .lp-island {
   position: absolute;
-  top: 13px;
+  top: 12px;
   left: 50%;
   transform: translateX(-50%);
-  width: 84px;
-  height: 25px;
+  width: 29%;
+  height: 22px;
   background: #000;
   border-radius: 100px;
   z-index: 7;
@@ -5963,7 +5949,7 @@ html[data-theme="dark"] .lp-phone {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #39404E 0%, #05070A 70%);
+  background: radial-gradient(circle at 36% 34%, #576784 0%, #1c2a45 19%, #111826 39%, #05070a 72%);
   box-shadow: inset 0 0 1px rgba(120, 140, 180, .35);
 }
 
@@ -5972,9 +5958,11 @@ html[data-theme="dark"] .lp-phone {
   width: 100%;
   height: 100%;
   background: var(--brand-bg);
-  border-radius: 38px;
+  border-radius: 35px;
   overflow: hidden;
-  padding: 10px 14px 14px;
+  padding: 10px 12px 22px;
+  display: flex;
+  flex-direction: column;
   transition: background .25s;
 }
 
@@ -6084,6 +6072,17 @@ html[data-theme="dark"] .lp-phone-screen {
   border-radius: 16px;
   padding: 9px;
   box-shadow: 0 10px 22px -14px rgba(21, 23, 13, .35);
+}
+
+.lp-phone-screen .lp-swipe-card {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.lp-phone-screen .lp-swipe-photo {
+  flex: 1;
+  min-height: 140px;
 }
 
 .lp-swipe-photo {
@@ -6726,6 +6725,17 @@ html[data-theme="dark"] .lp-pain-title-big {
   color: var(--brand-ink-soft);
   line-height: 1.6;
   margin: 0;
+}
+
+@media (min-width: 761px) {
+  .lp-section.lp-pain-section { padding-bottom: 30px; }
+  .lp-pain-item p.a { font-size: clamp(17px, 1.4vw, 21px); max-width: 58ch; }
+  .lp-dawn#lpDawn { min-height: 0; padding: clamp(42px, 5.5vw, 90px) 0; }
+  #lpDawn .lp-dawn-eyebrow { font-size: 15px; }
+  #lpDawn .lp-dawn-text { font-size: clamp(29px, 3vw, 44px); max-width: 1000px; }
+  #lp-how .lp-section-title { font-size: clamp(36px, 4vw, 58px); }
+  #lp-how .lp-section-body { font-size: clamp(18px, 1.6vw, 23px); }
+  #lp-how .lp-section-head { margin-bottom: 34px; }
 }
  
 /* Вывод-плашка: было brand-surface-2 с пунктирной зелёной рамкой — заменил
@@ -7522,6 +7532,113 @@ html[data-theme="dark"] .lp-cta-box .lp-btn-primary {
   align-items: center;
 }
 
+.discover-catalog {
+  position: relative;
+  z-index: 8;
+  width: min(100%, 530px);
+  margin-bottom: 14px;
+}
+.discover-catalog-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin-bottom: 8px;
+}
+.discover-catalog-head label { color: var(--ink); font-size: 16px; font-weight: 700; }
+.discover-catalog-head > span { color: var(--ink-soft); font-size: 13px; }
+.discover-search-box {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--ink-soft);
+}
+.discover-search-box:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+.discover-search-box > svg { flex: 0 0 auto; }
+.discover-search-box input, .discover-search-box input:focus-visible {
+  width: 100%;
+  min-width: 0;
+  height: 46px;
+  border: 0;
+  padding: 0;
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+.discover-search-box input::placeholder { color: var(--ink-soft); }
+.discover-search-clear {
+  flex: 0 0 32px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--ink-soft);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.discover-search-clear[hidden] { display: none; }
+.discover-search-clear svg { width: 16px; height: 16px; }
+.discover-search-popup {
+  position: absolute;
+  inset: calc(100% + 6px) 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--brand-shadow-card);
+  overflow: hidden;
+}
+.discover-search-popup ul { margin: 0; padding: 4px; list-style: none; max-height: min(320px, 40vh); overflow-y: auto; }
+.discover-search-popup ul:empty { padding: 0; }
+.discover-search-status { margin: 0; padding: 8px 12px; font-size: 13px; color: var(--ink-soft); }
+.discover-search-popup li, .discover-upcoming button {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 7px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.discover-search-popup li:hover, .discover-search-popup li[aria-selected="true"],
+.discover-upcoming button:hover { background: var(--surface-2); }
+.discover-mini-photo { display: block; height: 38px; border-radius: 6px; }
+.discover-mini-photo .uni-photo-unavailable { display: none; }
+.discover-result-copy strong { display: block; font-size: 14px; line-height: 1.25; overflow-wrap: anywhere; }
+.discover-result-copy small { display: block; margin-top: 3px; font-size: 12px; line-height: 1.25; color: var(--ink-soft); }
+.discover-result-arrow { color: var(--ink-soft); font-size: 15px; }
+.discover-upcoming { display: none; }
+
+@media (min-width: 1230px) {
+  .discover-upcoming {
+    display: block;
+    position: absolute;
+    left: calc(100% + 22px);
+    top: 0;
+    width: min(17vw, 240px);
+    padding: 14px 10px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+  .discover-upcoming h2 { color: var(--ink); margin: 0 6px 5px; font-size: 15px; }
+  .discover-upcoming p { color: var(--ink-soft); margin: 0 6px 10px; font-size: 13px; line-height: 1.4; }
+  .discover-upcoming button { width: 100%; font: inherit; }
+  .discover-upcoming button + button { margin-top: 3px; }
+}
+
 /* В тёмной теме общий --bg (почти чёрный) на весь экран Discover ощущается
    слишком тяжёлым — фото карточек на нём выглядят как в яме. Смягчаем фон
    именно под Discover (не трогая Matches/DNA/сайдбар): несколько светлее
@@ -7653,6 +7770,26 @@ html[data-theme="dark"] .content:has(.discover-hero) {
      затемнённую зону. */
   background: linear-gradient(to top, rgba(10, 10, 8, .92) 0%, rgba(10, 10, 8, .6) 45%, rgba(10, 10, 8, 0) 82%);
 }
+
+.uni-grant {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.uni-grant svg { flex: 0 0 13px; width: 13px; height: 13px; }
+.hero-card-content .uni-grant { margin: 0 0 8px; background: #24272c; color: #eef0f5; }
+.hero-card-content :is(.grant-need, .grant-award, .grant-graduate) { background: #123d32; color: #c7f6dd; }
+.hero-card-content .grant-tuition { background: #413419; color: #ffeabf; }
+.hero-card-content .hero-card-loc { margin-bottom: 7px; }
+.ud-head-l .uni-grant, .match-info .uni-grant { margin-top: 8px; }
 
 .hero-badge {
   position: absolute;
@@ -9598,6 +9735,19 @@ html[data-theme="dark"] .dl-type { color: var(--primary); }
 .uni-photo.loaded {
   opacity: 1;
 }
+.uni-photo-unavailable {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 4px 7px;
+  border-radius: 5px;
+  background: #20242c;
+  color: #f1f4fa;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.hero-card-photo .uni-photo-unavailable { bottom: auto; top: 64px; }
+.match-thumb .uni-photo-unavailable, :is(.app-thumb, .sn-thumb) .uni-photo-unavailable { display: none; }
 
 /* Шапка страницы вуза: фото уходит под затемнение, текст — поверх.
    Раньше .uni-hero>* поднимал и само фото на z-index:1, выше градиента,
@@ -10495,7 +10645,7 @@ html[data-theme="dark"] .auth-submit.lp-btn-primary { box-shadow: none; }
 .ud-loc { margin: 0 0 8px; font-size: 14px; color: var(--ink-soft); }
 .ud-head h1 { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: clamp(30px, 4vw, 44px); line-height: 1.08; letter-spacing: -.02em; color: var(--ink); }
 .ud-tag { margin: 10px 0 0; font-size: 17px; line-height: 1.5; color: var(--ink-soft); max-width: 620px; }
-.ud-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.ud-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
 .ud-save, .ud-site { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px; border-radius: 8px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; white-space: nowrap; }
 .ud-save { border: 1px solid var(--btn-solid); background: var(--btn-solid); color: var(--btn-solid-ink); }
 .ud-save:hover { background: var(--btn-solid-hover); }
@@ -10518,6 +10668,10 @@ html[data-theme="dark"] .auth-submit.lp-btn-primary { box-shadow: none; }
 .ud-tabs button { flex-shrink: 0; padding: 9px 14px; border: 0; border-radius: 8px; background: none; color: var(--ink-soft); font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer; }
 .ud-tabs button:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .ud-tabs button.active { background: var(--btn-solid); color: var(--btn-solid-ink); }
+@media (max-width: 520px) {
+  .ud-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
+  .ud-tabs button { min-height: 44px; padding: 6px 8px; font-size: 13px; line-height: 1.25; }
+}
 .ud-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 40px; align-items: start; }
 /* блоки внутри вкладок — без карточек, просто разделы с линией */
 .ud .info-block { background: none !important; border: 0 !important; box-shadow: none !important; border-radius: 0 !important; padding: 22px 0 !important; margin: 0 !important; border-bottom: 1px solid var(--border) !important; backdrop-filter: none !important; }
@@ -10546,10 +10700,13 @@ html[data-theme="dark"] .auth-submit.lp-btn-primary { box-shadow: none; }
 @media (max-width: 900px) {
   .ud-grid { grid-template-columns: 1fr; gap: 0; }
   .ud-aside { position: static; }
+  .ud-head { flex-direction: column; align-items: stretch; gap: 16px; }
+  .ud-actions { justify-content: flex-start; }
 }
 @media (max-width: 640px) {
-  .ud-head { flex-direction: column; align-items: stretch; gap: 16px; padding: 18px 0; }
-  .ud-actions > * { flex: 1; justify-content: center; }
+  .ud-head { padding: 18px 0; }
+  .ud-actions > * { flex: 1 1 auto; min-width: 0; min-height: 44px; justify-content: center; padding-inline: 10px; }
+  .ud-actions > .ud-site { flex-basis: 100%; }
   .ud-facts { grid-template-columns: 1fr 1fr; gap: 16px 0; }
   .ud-facts > div:nth-child(3) { padding-left: 0; border-left: 0; }
   .ud-facts dd { font-size: 20px; }
@@ -11022,6 +11179,29 @@ html[data-theme="dark"] .content:has(.discover-hero) { background: transparent; 
   .ob-form-panel { padding: 12px 12px 112px; }
   .ob-card { padding: 20px 16px 22px; border-radius: 18px; box-shadow: none; }
   .ob-card h1, .ob-card h2 { font-size: 26px; line-height: 1.15; }
+  .ob-form-panel:has(.major-grid) { padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
+  .ob-card:has(.major-grid) { padding-bottom: 14px; }
+  .field:has(> .major-grid) { margin-bottom: 0; }
+  .category-scroll:has(+ .major-grid) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+  .category-scroll:has(+ .major-grid) .category-chip {
+    min-width: 0;
+    min-height: 44px;
+    padding: 6px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.25;
+    white-space: normal;
+    text-align: left;
+  }
+  .category-chip > span:last-child { overflow-wrap: anywhere; }
+  .major-grid .major-card { padding: 21px 8px 8px; }
+  .major-grid .major-name { hyphens: auto; }
 
   /* Discover: компактная верхняя панель и карточка во весь экран */
   .hero-progress { gap: 4px; }

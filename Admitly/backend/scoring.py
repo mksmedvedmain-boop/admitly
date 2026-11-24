@@ -263,7 +263,9 @@ def cost_info(u: University, p: Profile) -> dict:
     3. ВЕРДИКТ (verdict): да / только с помощью / нет.
 
     Зеркало costInfo() в app.js — менять синхронно."""
-    tuition = getattr(u, "tuition", None) or getattr(u, "cost", 0) or 0
+    tuition = getattr(u, "tuition", None)
+    if tuition is None:
+        tuition = getattr(u, "cost", 0) or 0
     living = getattr(u, "living", None)
     if living is None:
         living = 15000
@@ -410,6 +412,12 @@ def admission_reality(u: University, p: Profile) -> str:
     а не с общим acceptance rate. SAT 25/75 для вузов США взяты из College Scorecard, GPA 25/75 и данные
     вузов вне США оценены по доле принятых (см. README).
     """
+    ege = _entry_tests(p.tests, "EGE")
+    if getattr(u, "country", None) == "Russia" and _entry_taken(ege):
+        # Same estimate as egeReality() in the UI, not a program cutoff.
+        need = 290 if u.acceptance < 0.2 else 260
+        score = _entry_score(ege)
+        return "Likely" if score >= need + 8 else ("Target" if score >= need - 12 else "Reach")
     rank = {"below": 0, "within": 1, "above": 2}
     gpa_pos = "below" if p.gpa < u.gpa25 else ("above" if p.gpa > u.gpa75 else "within")
 

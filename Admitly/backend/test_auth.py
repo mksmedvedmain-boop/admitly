@@ -187,9 +187,11 @@ st, alive = call("GET", f"/users/{uid}", token=TOKEN)
 check("первый токен всё ещё жив (отдельные сессии)", st == 200)
 
 # ================================================================ 9. Хеш в БД
-import sqlite3
-con = sqlite3.connect("unimatch.db")
-row = con.execute("SELECT password_hash FROM users WHERE id=?", (uid,)).fetchone()
+from database import engine
+from sqlalchemy import text
+with engine.connect() as con:
+    row = con.execute(text("SELECT password_hash FROM users WHERE id=:id"), {"id": uid}).fetchone()
+engine.dispose()
 h = row[0] if row else ""
 check("пароль хранится как pbkdf2_sha256", h.startswith("pbkdf2_sha256$"), h[:40])
 check("plaintext пароля в БД отсутствует", "secret123" not in h)

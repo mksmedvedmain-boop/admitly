@@ -37,8 +37,9 @@ PROVIDER = "stripe"
 
 
 def configured() -> bool:
-    """True, если оплата реально подключена: есть ключ и библиотека."""
-    if not os.environ.get("STRIPE_SECRET_KEY"):
+    """Do not offer checkout unless the app can also handle the webhook."""
+    required = ("STRIPE_SECRET_KEY", "STRIPE_PRICE_ID", "STRIPE_WEBHOOK_SECRET", "FRONTEND_URL")
+    if not all(os.environ.get(name, "").strip() for name in required):
         return False
     try:
         import stripe  # noqa: F401
@@ -66,7 +67,7 @@ def create_checkout_session(user_id: int, email: str = None) -> dict:
     price_id = os.environ.get("STRIPE_PRICE_ID")
     if not price_id:
         raise RuntimeError("Оплата не настроена: задай STRIPE_PRICE_ID")
-    frontend = os.environ.get("FRONTEND_URL", "http://localhost:5500").rstrip("/")
+    frontend = os.environ["FRONTEND_URL"].rstrip("/")
     stripe = _stripe()
     params = {
         "mode": "subscription",

@@ -17,6 +17,7 @@ import types
 import unittest
 import uuid
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_fixes.db")
 
@@ -55,9 +56,11 @@ def _fake_stripe_module():
 class FixesTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        os.environ["STRIPE_SECRET_KEY"] = "sk_test_fake"
-        os.environ["STRIPE_PRICE_ID"] = "price_fake"
-        sys.modules["stripe"] = _fake_stripe_module()
+        cls.enterClassContext(patch.dict(os.environ, {
+            "STRIPE_SECRET_KEY": "sk_test_fake", "STRIPE_PRICE_ID": "price_fake",
+            "STRIPE_WEBHOOK_SECRET": "whsec_fake", "FRONTEND_URL": "http://localhost:5500",
+        }))
+        cls.enterClassContext(patch.dict(sys.modules, {"stripe": _fake_stripe_module()}))
         import main  # импорт после мока stripe
         cls.main = main
         cls.client = TestClient(main.app)
@@ -316,6 +319,43 @@ class FixesTest(unittest.TestCase):
                                   "subscription": None}}}
         r = self._webhook(ev)
         self.assertEqual(r.status_code, 502)
+
+    def test_payment_config_requires_webhook_and_frontend(self):
+        self.assertTrue(self.client.get("/payments/config").json()["stripe"])
+        for key in ("STRIPE_WEBHOOK_SECRET", "FRONTEND_URL", "STRIPE_PRICE_ID"):
+            with self.subTest(key=key), patch.dict(os.environ, {key: ""}):
+                self.assertFalse(self.client.get("/payments/config").json()["stripe"])
+
+    def test_subscription_lookup_retries_same_event(self):
+        user = self._guest()
+        event = {
+            "id": "evt_retry_" + self.run_id, "type": "invoice.paid",
+            "data": {"object": {"subscription": "sub_new", "period_end": int(time.time()) + 86400}},
+        }
+        with patch.object(sys.modules["stripe"].Subscription, "retrieve", side_effect=TimeoutError):
+            self.assertEqual(self._webhook(event).status_code, 502)
+        with patch.object(sys.modules["stripe"].Subscription, "retrieve",
+                          return_value={"metadata": {"user_id": str(user["id"])}}):
+            self.assertEqual(self._webhook(event).json(), {"ok": True})
+            self.assertEqual(self._webhook(event).json()["note"], "duplicate event")
+        billing = self.client.get(f"/users/{user['id']}/billing", headers={"X-Guest-Token": user["guestId"]})
+        self.assertTrue(billing.json()["is_premium"])
+
+    def test_nonfinite_test_score_rejected(self):
+        import schemas
+        from pydantic import ValidationError
+        for score in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(score=score), self.assertRaises(ValidationError):
+                schemas.Tests.model_validate({"SAT": {"taken": True, "score": score}})
+
+    def test_zero_tuition_and_russian_ege(self):
+        import scoring
+        import schemas
+        uni = types.SimpleNamespace(tuition=0, cost=9000, living=9000, country="Russia", acceptance=0.34)
+        p = schemas.Profile(tests={"EGE": {"taken": True, "score": 280}}, budget=9000)
+        self.assertEqual(scoring.cost_info(uni, p)["total"], 9000)
+        self.assertEqual(scoring.cost_info(uni, p)["verdict"], "yes")
+        self.assertEqual(scoring.admission_reality(uni, p), "Likely")
 
 
 if __name__ == "__main__":

@@ -122,13 +122,13 @@ const GRADIENTS = [
 // хранимый профиль от языка интерфейса не зависит.
 const MAJOR_CATEGORIES = [
   {
-    key: 'cs', label: 'Computer Science & Technology', label_ru: 'Компьютерные науки и технологии', icon: 'laptop', majors: [
+    key: 'cs', label: 'Computer Science & Technology', label_ru: 'ИТ и технологии', icon: 'laptop', majors: [
       { value: 'Computer Science', ru: 'Компьютерные науки' },
       { value: 'Artificial Intelligence / Machine Learning', ru: 'Искусственный интеллект / машинное обучение' },
       { value: 'Data Science', ru: 'Наука о данных' },
       { value: 'Software Engineering', ru: 'Программная инженерия' },
       { value: 'Computer Engineering', ru: 'Компьютерная инженерия' },
-      { value: 'Cybersecurity', ru: 'Кибербезопасность' },
+      { value: 'Cybersecurity', ru: 'Кибер\u00adбезопасность' },
       { value: 'Information Systems / IT', ru: 'Информационные системы / IT' },
       { value: 'Robotics', ru: 'Робототехника' },
       { value: 'Game Development', ru: 'Разработка игр' },
@@ -202,7 +202,7 @@ const MAJOR_CATEGORIES = [
     ]
   },
   {
-    key: 'law', label: 'Law & Government', label_ru: 'Право и государственное управление', icon: 'scale', majors: [
+    key: 'law', label: 'Law & Government', label_ru: 'Право и госуправление', icon: 'scale', majors: [
       { value: 'Pre-Law', ru: 'Пре-лоу (подготовка к юрфаку)' },
       { value: 'Criminal Justice', ru: 'Уголовное право и юстиция' }
     ]
@@ -399,7 +399,8 @@ const STRINGS = {
     pm_lead: "Симулятор показывает, как изменится твой шанс, если поднять GPA или балл теста, и в каких вузах это реально что-то даст.",
     pm_cta: "Включить Premium для теста", pm_cta_active: "Premium активен", pm_demo_note: "Оплата ещё не подключена: кнопка включает Premium сразу и бесплатно — чтобы всё попробовать.",
     pm_buy: "Оформить Premium", pm_buy_note: "Оплата картой на защищённой странице Stripe. Premium включается сразу после оплаты.",
-    pm_pay_off: "Оплата ещё не подключена — сообщим, когда запустим", pm_pay_success: "Оплата прошла! Premium включается в течение минуты.",
+    pm_pay_off: "Оплата ещё не подключена — сообщим, когда запустим", pm_pay_check: "Проверяем статус Premium…",
+    pm_pay_confirmed: "Premium активен.", pm_pay_pending: "Premium пока не подтверждён. Проверь статус позже в профиле.",
     pm_insight_title: n => `В ${n} ${ruPlural(n, 'вузе', 'вузах', 'вузах')} ты в шаге от следующего уровня`,
     pm_insight_none: "Лайкни несколько вузов, и здесь появится твой личный расчёт.",
     pm_insight_row: (from, to, d, unit) => `${chanceLabel(from)} → ${chanceLabel(to)}, если поднять ${unit} на ${d}`,
@@ -689,7 +690,8 @@ const STRINGS = {
     pm_lead: "The simulator shows how your admission chances change if you raise GPA or a test score, and at which schools it actually matters.",
     pm_cta: "Turn on Premium for testing", pm_cta_active: "Premium is on", pm_demo_note: "Payments aren't wired up yet: the button turns Premium on right away, free, so you can try everything.",
     pm_buy: "Get Premium", pm_buy_note: "Card payment on Stripe's secure page. Premium turns on right after payment.",
-    pm_pay_off: "Payments aren't connected yet — we'll announce the launch", pm_pay_success: "Payment complete! Premium activates within a minute.",
+    pm_pay_off: "Payments aren't connected yet — we'll announce the launch", pm_pay_check: "Checking Premium status…",
+    pm_pay_confirmed: "Premium is active.", pm_pay_pending: "Premium is not confirmed yet. Check your account again later.",
     pm_insight_title: n => `You are one step from the next level at ${n} ${n === 1 ? 'school' : 'schools'}`,
     pm_insight_none: "Like a few schools and your personal calculation will appear here.",
     pm_insight_row: (from, to, d, unit) => `${from} → ${to} at ${unit} +${d}`,
@@ -1014,7 +1016,7 @@ const MAP_COUNTRY_NAMES = {
 const GUEST_KEY = 'unimatch_guest_v1';
 
 function generateGuestId() {
-  return 'guest_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
+  return 'guest_' + Array.from(crypto.getRandomValues(new Uint8Array(24)), n => n.toString(16).padStart(2, '0')).join('');
 }
 
 /* ---------- Локальная сессия — теперь только "указатель" на пользователя на
@@ -1099,7 +1101,7 @@ async function apiRequest(path, options = {}, { rawResponse, silent } = {}) {
   } catch (e) {
     clearTimeout(timer);
     // Сервер недоступен физически (не запущен / сеть отвалилась) — не роняем приложение.
-    toast(t('server_error'));
+    if (!silent) toast(t('server_error'));
     throw e;
   }
   if (!res.ok) {
@@ -1371,7 +1373,7 @@ function matchParts(u, p) {
   if (c.verdict === 'yes') cost = 1;
   else if (c.verdict === 'aid') cost = 0.55;
   else cost = Math.max(0, 0.3 * Math.min(1, c.budget / Math.max(c.netBest, 1)));
-  const r = u._reality || admissionReality(u, p);
+  const r = egeReality(u, p) || admissionReality(u, p);
   const chance = r === 'Likely' ? 1 : (r === 'Target' ? 0.85 : (u.acceptance < 0.1 ? 0.3 : 0.5));
   const research = Math.max(0, 1 - Math.abs((u.research || 3) - p.research) / 4);
   let prefs = null; const pp = [];
@@ -1487,13 +1489,6 @@ function uniFactsBlock(u) {
 function uniSite(u) {
   return u && (u.website || (UNI_EXTRA[u.id] || {}).website || (UNIVERSITIES.find(x => x.id === u.id) || {}).website) || '';
 }
-
-// До-заливка фото для вузов, у которых в сгенерированном каталоге нет картинки.
-// NYU Abu Dhabi — фото кампуса с Wikimedia Commons. Universidad de San Andrés —
-// на Commons есть только логотип, поэтому взято официальное фото кампуса Victoria
-// с CDN самого вуза (og:image с images.udesa.edu.ar).
-UNI_PHOTO_EXTRA[312] = 'https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1a/NYUAbuDhabiSaadiyat.jpg/1280px-NYUAbuDhabiSaadiyat.jpg';
-UNI_PHOTO_EXTRA[325] = 'https://images.udesa.edu.ar/sites/default/files/2025-10/udesa-campus-victoria.jpg';
 
 // Редакторские правки нескольких русских описаний из сгенерированного каталога
 // (файл unidata.js руками не правим — правим точечно здесь, по id вуза).
@@ -1855,14 +1850,28 @@ function cardPhotoStyle(u) {
      (см. `.uni-photo.loaded` ниже и CSS `.uni-photo`).
    - Изображение отрендерено как absolute inset:0, чтобы сохранить
      поведение «контейнер-хост с position:relative». */
-function uniVisual(u) {
-  // Фолбэк по UNI_PHOTO_EXTRA — на случай, когда объект вуза пришёл напрямую
-  // из локального UNIVERSITIES и photo не подмешан (например NYU Abu Dhabi).
+function uniVisual(u, eager = false) {
   const photo = u.photo || UNI_PHOTO_EXTRA[u.id];
-  if (photo) {
-    return `${cardScene(u)}<img class="uni-photo" src="${photo}" alt="${u.name}" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">`;
-  }
-  return cardScene(u);
+  const missing = isRu() ? 'Фото недоступно' : 'Photo unavailable';
+  return `${cardScene(u)}<span class="uni-photo-unavailable"${photo ? ' hidden' : ''}>${missing}</span>` +
+    (photo ? `<img class="uni-photo" src="${esc2(photo)}" alt="" loading="${eager ? 'eager' : 'lazy'}" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">` : '');
+}
+
+// These are catalog-level opportunities, not a promise or a budget estimate.
+const SCHOLARSHIP_AWARDS = {
+  4: 'tuition', 19: 'award', 20: 'tuition', 44: 'award', 45: 'award', 47: 'tuition', 192: 'award',
+  193: 'graduate', 292: 'tuition', 294: 'tuition', 298: 'tuition'
+};
+function grantBadge(u) {
+  const key = SCHOLARSHIP_AWARDS[u.id] || (UNI_DATA[u.id]?.[2] === 'full' ? 'need' : 'unknown');
+  const labels = {
+    need: ['До 100% по финансовой нужде', 'Up to full demonstrated need'],
+    award: ['Полный грант возможен', 'Full scholarship possible'],
+    graduate: ['Полное финансирование магистратуры и PhD', 'Full funding for master’s and PhD'],
+    tuition: ['До 100% платы за обучение', 'Up to full tuition'],
+    unknown: ['Полный грант не подтверждён', 'Full scholarship not confirmed']
+  };
+  return `<span class="uni-grant grant-${key}">${ICONS.spark}<span>${L2(labels[key])}</span></span>`;
 }
 
 const SKY_BY_CLIMATE = {
@@ -2358,28 +2367,45 @@ async function buildDeck() {
   state.deck = rows.map(fromApiUniScored);
   state.deck.sort((a, b) => b._match - a._match);
   state.deck.forEach(u => { state.uniCache[u.id] = u; });
+  state.deckError = null;
 }
 
 /* ---------- Discover-screen filters: region + budget, editable without redoing onboarding ---------- */
 async function rebuildDeckKeepingHistory() {
-  await apiSaveProfile(); // persist изменившийся profile.continents/countries/budget на бэке
-  await buildDeck();      // и сразу перезапросить deck с новым фильтром
+  const active = state;
+  active.filtersPending = true;
+  if (state.screen === 'discover') renderDiscover();
+  let saved = false;
+  try {
+    await apiSaveProfile();
+    saved = true;
+    await buildDeck();
+    rescoreAll();
+    saveGuestSession();
+  } catch (e) {
+    active.deckError = active.userId;
+    return saved;
+  } finally {
+    active.filtersPending = false;
+  }
+  return true;
 }
 async function toggleDiscoverContinent(key) {
+  if (state.filtersPending || state.deckLoading || state.swipePending || state.sessionNeedsRetry || !state.userId) return;
   const p = state.profile;
+  const before = { continents: p.continents.slice(), countries: p.countries.slice() };
   const idx = p.continents.indexOf(key);
   if (idx > -1) p.continents.splice(idx, 1); else p.continents.push(key);
-  p.countries = p.countries.filter(c => p.continents.some(k => (REAL_COUNTRIES_BY_CONTINENT[k] || []).includes(c)));
-  renderDiscover(); // мгновенно показываем нажатый чип, не дожидаясь сети
-  await rebuildDeckKeepingHistory();
-  saveGuestSession();
-  renderDiscover();
+  p.countries = p.countries.filter(c => p.continents.length && p.continents.some(k => (REAL_COUNTRIES_BY_CONTINENT[k] || []).includes(c)));
+  if (!await rebuildDeckKeepingHistory()) Object.assign(p, before);
+  if (state.screen === 'discover') renderDiscover();
 }
 async function setDiscoverBudget(value) {
+  if (state.filtersPending || state.deckLoading || state.swipePending || state.sessionNeedsRetry || !state.userId) return;
+  const previous = state.profile.budget;
   state.profile.budget = parseInt(value, 10);
-  await rebuildDeckKeepingHistory();
-  saveGuestSession();
-  renderDiscover();
+  if (!await rebuildDeckKeepingHistory()) state.profile.budget = previous;
+  if (state.screen === 'discover') renderDiscover();
 }
 
 /* ============================================================
@@ -2462,6 +2488,16 @@ function enterOnboarding() {
   }, 260);
 }
 function backToLanding() {
+  if (state.onboardingSaving) return;
+  if (state.profileBeforeEdit) {
+    state.profile = state.profileBeforeEdit;
+    state.profileBeforeEdit = null;
+    state.obMajorCategory = findMajorCategory(state.profile.major);
+    document.getElementById('onboarding').classList.add('hidden');
+    document.getElementById('mainapp').classList.remove('hidden');
+    go(state.profileEditFrom || 'discover');
+    return;
+  }
   // Прогресс всё равно не теряется — он уже лежит в state и (для гостевой сессии) в localStorage,
   // поэтому можно спокойно вернуться на главную и продолжить с того же места через "Начать бесплатно".
   const landing = document.getElementById('landing');
@@ -2669,7 +2705,7 @@ function renderLoginScreen() {
         <p class="auth-sub">${t(isRegister ? 'auth_register_sub' : 'auth_login_sub')}</p>
         <div class="auth-card">
           <form onsubmit="submitAuthForm(event)">
-            ${authState.error ? `<div class="auth-error">${ICONS.info}<span>${authState.error}</span></div>` : ''}
+            ${authState.error ? `<div class="auth-error" role="alert">${ICONS.info}<span>${esc2(authState.error)}</span></div>` : ''}
             <div class="auth-field">
               <input id="auth-email-input" type="email" autocomplete="email" placeholder="${t('auth_email_ph')}" required>
             </div>
@@ -3156,6 +3192,7 @@ function renderLanding() {
         </div>
         <div class="lp-hero-visual lp-phone-stage">
           <div class="lp-phone">
+            <span class="lp-phone-btn p0" aria-hidden="true"></span>
             <span class="lp-phone-btn p1" aria-hidden="true"></span>
             <span class="lp-phone-btn p2" aria-hidden="true"></span>
             <div class="lp-phone-screen">
@@ -3172,7 +3209,7 @@ function renderLanding() {
                 <div class="lp-screen-avatar"></div>
               </div>
               <div class="lp-swipe-card">
-                <div class="lp-swipe-photo">${uniVisual(UNIVERSITIES.find(x => x.id === 25) || { id: 25, setting: 'Suburban', climate: 'Warm' })}<span class="tag">Stanford, CA</span></div>
+                <div class="lp-swipe-photo">${uniVisual(UNIVERSITIES.find(x => x.id === 25), true)}<span class="tag">Stanford, CA</span></div>
                 <h4 class="lp-swipe-name">Stanford University</h4>
                 <p class="lp-swipe-loc">Stanford, CA, USA</p>
                 <div class="lp-swipe-scores">
@@ -3207,7 +3244,7 @@ function renderLanding() {
       </div>
     </section>
 
-    <section class="lp-section tight">
+    <section class="lp-section tight lp-pain-section">
       <div class="lp-container">
         <div class="lp-section-head">
           <h2 class="lp-section-title lp-pain-title">${painTitleMarkup()}</h2>
@@ -3952,14 +3989,6 @@ function renderOnboarding() {
   const isCategoryChange = state.obMajorCategory !== lastAnimatedMajorCategory;
   lastAnimatedMajorCategory = state.obMajorCategory;
 
-  // renderOnboarding() перерисовывает весь #onboarding через innerHTML, из-за
-  // чего .major-grid (список специальностей, свой overflow-y:auto) и
-  // .category-scroll каждый раз создаются заново и теряют scrollTop/scrollLeft —
-  // визуально это выглядит как "прыжок" к началу списка при каждом выборе
-  // специальности. Запоминаем прокрутку до перерисовки и восстанавливаем её
-  // после, кроме случаев смены шага/категории, когда список и так новый.
-  const prevMajorGrid = document.querySelector('.major-grid');
-  const prevMajorGridScrollTop = (prevMajorGrid && !isStepChange && !isCategoryChange) ? prevMajorGrid.scrollTop : 0;
   const prevCategoryScroll = document.querySelector('.category-scroll');
   const prevCategoryScrollLeft = (prevCategoryScroll && !isStepChange) ? prevCategoryScroll.scrollLeft : 0;
 
@@ -4009,14 +4038,14 @@ function renderOnboarding() {
         <p class="field-hint">${t('multi_select_hint')}</p>
         <div class="category-scroll ${isStepChange ? 'stagger-in' : ''}">
           ${MAJOR_CATEGORIES.map(c => `
-            <button type="button" class="category-chip ${state.obMajorCategory === c.key ? 'active' : ''}" onclick="setMajorCategory('${c.key}')">
+            <button type="button" class="category-chip ${state.obMajorCategory === c.key ? 'active' : ''}" aria-pressed="${state.obMajorCategory === c.key}" onclick="setMajorCategory('${c.key}')">
               <span class="category-chip-icon">${ICONS[c.icon]}</span><span>${categoryLabel(c)}</span>
             </button>`).join('')}
         </div>
-        <div class="major-grid ${(isStepChange || isCategoryChange) ? 'stagger-in' : ''}" style="margin-top:10px;">
+        <div class="major-grid ${(isStepChange || isCategoryChange) ? 'stagger-in' : ''}">
           ${(MAJOR_CATEGORIES.find(c => c.key === state.obMajorCategory) || MAJOR_CATEGORIES[0]).majors.map(m => `
-            <button type="button" class="major-card ${p.majors.includes(m.value) ? 'active' : ''}" onclick="setMajor('${m.value}')">
-              ${p.majors.includes(m.value) ? `<span class="major-card-check">${ICONS.check}</span>` : ''}
+            <button type="button" class="major-card ${p.majors.includes(m.value) ? 'active' : ''}" aria-pressed="${p.majors.includes(m.value)}" onclick="setMajor('${m.value}')">
+              ${p.majors.includes(m.value) ? `<span class="major-card-check" aria-hidden="true">${ICONS.check}</span>` : ''}
               <span class="major-name">${majorLabel(m.value)}</span>
             </button>`).join('')}
         </div>
@@ -4083,7 +4112,7 @@ function renderOnboarding() {
       </div>
       <div class="field">
         <label>${t('budget_label')}</label>
-        <div class="slider-row"><input type="range" min="0" max="70000" step="1000" value="${p.budget}" oninput="updateSlider('budget',this.value,'val-budget',v=>fmtMoney(parseInt(v)))"><div class="slider-val" id="val-budget">${fmtMoney(p.budget)}</div></div>
+        <div class="slider-row"><input type="range" min="0" max="${Math.max(80000, Math.ceil(p.budget / 1000) * 1000)}" step="1000" aria-label="${t('budget_kv')}" value="${p.budget}" oninput="updateSlider('budget',this.value,'val-budget',v=>fmtMoney(parseInt(v)))"><div class="slider-val" id="val-budget">${fmtMoney(p.budget)}</div></div>
       </div>
       <div class="field">
         <label>${t('aid_label')}</label>
@@ -4131,7 +4160,7 @@ function renderOnboarding() {
       </div>`;
     navHtml = `
       <button class="btn btn-ghost" onclick="obBack()">${t('back')}</button>
-      <button class="btn btn-primary" onclick="finishOnboarding()">${t('start_swiping')}</button>`;
+      <button class="btn btn-primary" onclick="finishOnboarding()" ${state.onboardingSaving ? 'disabled aria-busy="true"' : ''}>${t('start_swiping')}</button>`;
   }
 
   const stepTitles = [t('ob0_title'), t('obx_title'), t('ob1_title'), t('ob2_title'), t('ob3_title')];
@@ -4139,7 +4168,7 @@ function renderOnboarding() {
   const brandPanel = `
     <aside class="ob-brand-panel">
       <div class="ob-brand-top">
-        <div class="ob-brand-logo" onclick="backToLanding()" style="cursor:pointer;" title="${state.lang === 'ru' ? 'Вернуться на главную' : 'Back to home'}"><div class="mark">${ICONS.logo}</div><div class="text">Admitly</div></div>
+        <div class="ob-brand-logo" onclick="backToLanding()" style="cursor:pointer;" title="${state.profileBeforeEdit ? (isRu() ? 'Отменить изменения' : 'Discard changes') : (isRu() ? 'Вернуться на главную' : 'Back to home')}"><div class="mark">${ICONS.logo}</div><div class="text">Admitly</div></div>
         <div style="display:flex;align-items:center;gap:10px;">
           <div class="ob-lang-switch-dark">
             <button class="${state.lang === 'ru' ? 'active' : ''}" onclick="setLang('ru')">RU</button>
@@ -4170,7 +4199,7 @@ function renderOnboarding() {
         <div class="ob-card">
           <div class="ob-mobile-bar">
             <div class="ob-top-row">
-              <button class="ob-mobile-home" onclick="backToLanding()" title="${state.lang === 'ru' ? 'На главную' : 'Home'}">${ICONS.back} ${state.lang === 'ru' ? 'Главная' : 'Home'}</button>
+              <button class="ob-mobile-home" onclick="backToLanding()">${ICONS.back} ${state.profileBeforeEdit ? (isRu() ? 'Отмена' : 'Cancel') : (isRu() ? 'Главная' : 'Home')}</button>
               ${langSwitcher()}
             </div>
             <div class="ob-progress">${OB_STEPS.map((_, i) => `<i class="${i <= s ? 'done' : ''}"></i>`).join('')}</div>
@@ -4186,12 +4215,7 @@ function renderOnboarding() {
   // отдельно, императивно, уже после того как разметка реально в DOM.
   if (s === 3) mountWorldMap();
 
-  // Восстанавливаем прокрутку списка специальностей и строки категорий
-  // (см. комментарий в начале функции) — без этого выбор специальности
-  // визуально "перебрасывал" список наверх.
   if (s === 0) {
-    const majorGrid = document.querySelector('.major-grid');
-    if (majorGrid) majorGrid.scrollTop = prevMajorGridScrollTop;
     const categoryScroll = document.querySelector('.category-scroll');
     if (categoryScroll) categoryScroll.scrollLeft = prevCategoryScrollLeft;
   }
@@ -4394,7 +4418,7 @@ function renderObSideFacts() {
 }
 
 function chip(label, active, onclick) {
-  return `<button type="button" class="chip ${active ? 'active' : ''}" onclick="${onclick}">${label}</button>`;
+  return `<button type="button" class="chip ${active ? 'active' : ''}" aria-pressed="${active ? 'true' : 'false'}" onclick="${onclick}">${label}</button>`;
 }
 
 function renderTestRow(key) {
@@ -4408,7 +4432,7 @@ function renderTestRow(key) {
         <span class="test-row-name">${TEST_NAME[key] || key}</span>
       </div>
       <label class="switch">
-        <input type="checkbox" ${info.taken ? 'checked' : ''} onchange="toggleTestTaken('${key}',this.checked)">
+        <input type="checkbox" aria-label="${TEST_NAME[key] || key}" ${info.taken ? 'checked' : ''} onchange="toggleTestTaken('${key}',this.checked)">
         <span class="switch-track"><span class="switch-thumb">${ICONS.check}</span></span>
       </label>
     </div>
@@ -4416,7 +4440,7 @@ function renderTestRow(key) {
     ${info.taken ? `
       <div class="test-row-score-wrap">
         <div class="test-row-score">
-          <input type="range" class="test-row-slider" min="${r.min}" max="${r.max}" step="${r.step}" value="${info.score}"
+          <input type="range" aria-label="${TEST_NAME[key] || key}" class="test-row-slider" min="${r.min}" max="${r.max}" step="${r.step}" value="${info.score}"
                  oninput="updateTestSlider('${key}',this.value)">
           <div class="test-row-score-val" id="val-test-${key}">${info.score}</div>
         </div>
@@ -4443,7 +4467,10 @@ function renderWorldMap() {
 let worldAtlasPromise = null;
 function getWorldAtlas() {
   if (!worldAtlasPromise) {
-    worldAtlasPromise = d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+    worldAtlasPromise = d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json').catch(error => {
+      worldAtlasPromise = null;
+      throw error;
+    });
   }
   return worldAtlasPromise;
 }
@@ -4723,54 +4750,59 @@ function obNext() { if (state.obStep < 4) state.obStep++; renderOnboarding(); }
 function obBack() { if (state.obStep > 0) state.obStep--; renderOnboarding(); }
 
 async function finishOnboarding() {
-  let user;
+  if (state.onboardingSaving) return;
+  state.onboardingSaving = true;
+  renderOnboarding();
   try {
-    user = await apiSaveProfile(); // POST /users — создаёт (или обновляет) пользователя на бэке
+    const user = await apiSaveProfile();
     state.userId = user.id;
     state.guestId = user.guestId;
     state.isRegistered = user.isRegistered;
     state.email = user.email;
+    state.isPremium = !!user.isPremium;
+    state.profileBeforeEdit = null;
     saveGuestSession();
   } catch (e) {
-    // Бэкенд недоступен — переключаемся на Discover в гостевом режиме,
-    // чтобы пользователь не застревал на онбординге.
-    state.userId = null;
-    saveGuestSession();
+    return; // keep the current form and let the user retry the save
+  } finally {
+    state.onboardingSaving = false;
+    renderOnboarding();
   }
 
-  // Профиль на бэке уже создан — переключаемся на Discover сразу, показывая skeleton-карточки,
-  // а не ждём ответа GET /universities вслепую на экране онбординга. На бесплатном тарифе
-  // Render бэкенд может "просыпаться" 10-30 секунд, и без этого пользователь решит, что кнопка
-  // онбординга просто не сработала.
-  state.deckLoading = true;
   document.getElementById('onboarding').classList.add('hidden');
   document.getElementById('mainapp').classList.remove('hidden');
   state.screen = 'discover';
+  await refreshDiscoverDeck();
+}
+async function refreshDiscoverDeck() {
+  if (!state.userId || state.deckLoading) return;
+  state.deckLoading = true;
+  state.deckError = null;
   renderApp();
-
   try {
     await buildDeck();
+    rescoreAll();
   } catch (e) {
-    // apiRequest уже показал toast; оставляем skeleton не зависшим навечно — просто
-    // выключаем состояние загрузки, deck.length останется 0 и покажется deck-empty.
+    state.deckError = state.userId;
+  } finally {
+    state.deckLoading = false;
+    renderApp();
   }
-  state.deckLoading = false;
-  renderApp();
 }
 
-function restartOnboarding() {
-  if (!confirm(t('restart_confirm'))) return;
-  try { lsRemove(GUEST_KEY); } catch (e) { }
-  try { lsRemove(TRACKER_KEY); } catch (e) { }
-  const keepLang = state.lang;
-  state = {
-    screen: 'discover', obStep: 0, obMajorCategory: 'cs', lang: keepLang, guestId: generateGuestId(), userId: null, isRegistered: false, email: null,
-    profile: { gpa: 3.6, tests: { SAT: { taken: true, score: 1350 }, ACT: { taken: false, score: 30 }, IELTS: { taken: false, score: 7 }, TOEFL: { taken: false, score: 95 }, DET: { taken: false, score: 120 }, IB: { taken: false, score: 36 }, EGE: { taken: false, score: 250 } }, homeCountry: '', nativeLang: '', major: 'Computer Science', majors: ['Computer Science'], degreeLevel: 'bachelor', size: [], setting: [], climate: [], research: 3, budget: 40000, needsAid: null, continents: [], countries: [] },
-    deck: [], liked: [], disliked: [], uniCache: {}, currentUniId: null, activeTab: 'overview', matchFilter: 'all', recentPasses: [], trackerView: 'tracker', trackerExpanded: new Set(), uniLookupPending: false
-  };
+function editOnboardingProfile() {
+  if (!state.userId || state.filtersPending || state.swipePending || state.deckLoading || state.sessionNeedsRetry) return;
+  state.profileBeforeEdit = state.profile;
+  state.profile = JSON.parse(JSON.stringify(state.profile));
+  state.profileEditFrom = state.screen;
+  state.discoverPanelOpen = false;
+  state.obStep = 0;
+  state.obMajorCategory = findMajorCategory(state.profile.major);
+  lastAnimatedObStep = -1;
   document.getElementById('mainapp').classList.add('hidden');
   document.getElementById('onboarding').classList.remove('hidden');
   renderOnboarding();
+  window.scrollTo(0, 0);
 }
 
 /* ============================================================
@@ -4861,8 +4893,8 @@ function renderSidebar() {
       <div class="mini-profile">
         <div class="avatar"></div>
         <div>
-          <div class="mini-profile-name">${majorsLabel(p.majors)}</div>
-          <div class="mini-profile-sub">${t('degree_' + p.degreeLevel)} · ${statusLine}</div>
+          <div class="mini-profile-name">${esc2(majorsLabel(p.majors))}</div>
+          <div class="mini-profile-sub">${t('degree_' + p.degreeLevel)} · ${esc2(statusLine)}</div>
           <div class="mini-profile-sub2">${t('strength_label')}: ${academicStrength(p)}/100${(!p.tests.SAT.taken && !p.tests.ACT.taken) ? ' (GPA only)' : ''}</div>
         </div>
       </div>
@@ -4890,8 +4922,10 @@ async function submitAccountRegister(e) {
 
   try {
     const user = await apiAuthRegister(email, password);
+    if (user.sessionToken) saveAuthSession(user.sessionToken);
     state.guestId = user.guestId || state.guestId;
     await loadSessionForUser(user.id);
+    accountAuthState.submitting = false;
   } catch (err) {
     accountAuthState.submitting = false;
     accountAuthState.error = err.message || t('auth_error_generic');
@@ -4928,7 +4962,7 @@ function renderAccount() {
   const guestForm = `
         <div class="auth-card" style="margin-bottom:18px;">
           <form onsubmit="submitAccountRegister(event)">
-            ${accountAuthState.error ? `<div class="auth-error">${ICONS.info}<span>${accountAuthState.error}</span></div>` : ''}
+            ${accountAuthState.error ? `<div class="auth-error" role="alert">${ICONS.info}<span>${esc2(accountAuthState.error)}</span></div>` : ''}
             <div class="auth-field">
               <input id="account-email-input" type="email" autocomplete="email" placeholder="${t('auth_email_ph')}" required>
             </div>
@@ -4955,15 +4989,15 @@ function renderAccount() {
     <div class="auth-stage" style="min-height:55vh;padding:24px 20px;">
       <div class="auth-box">
         <div class="auth-mark">${ICONS.user}</div>
-        <h1 class="auth-title">${majorsLabel(p.majors)}</h1>
-        <p class="auth-sub">${t('degree_' + p.degreeLevel)} · ${statusLine}<br>${strengthLine}</p>
+        <h1 class="auth-title">${esc2(majorsLabel(p.majors))}</h1>
+        <p class="auth-sub">${t('degree_' + p.degreeLevel)} · ${esc2(statusLine)}<br>${strengthLine}</p>
         ${!state.isRegistered ? guestForm : ''}
         ${premiumStatusBlockHtml()}
         <div class="sidebar-foot-row account-lang-theme-row" style="justify-content:center;gap:20px;margin-bottom:14px;">
           ${langSwitcher()}
           ${themeSwitcher()}
         </div>
-        <button class="restart-btn" style="width:100%;" onclick="restartOnboarding()">${t('restart')}</button>
+        <button class="restart-btn" style="width:100%;" onclick="editOnboardingProfile()">${t('edit_profile_link')}</button>
       </div>
     </div>`;
 }
@@ -5247,16 +5281,17 @@ function discoverPanelHtml() {
       <h4>${t('filters_title')}</h4>
       <div class="chip-group">${Object.keys(CONTINENTS).map(k => chip(contName(k), state.profile.continents.includes(k), `toggleDiscoverContinent('${k}')`)).join('')}</div>
       <div class="filter-budget-row">
-        <label class="filter-budget-label">${t('budget_kv')}: <b id="discover-budget-val">${fmtMoney(state.profile.budget)}</b></label>
-        <input type="range" min="5000" max="80000" step="1000" value="${state.profile.budget}"
-          oninput="document.getElementById('discover-budget-val').textContent=fmtMoney(this.value)"
+        <label class="filter-budget-label" for="discover-budget">${t('budget_kv')}: <b id="discover-budget-val">${fmtMoney(state.profile.budget)}</b></label>
+        <input id="discover-budget" type="range" min="0" max="${Math.max(80000, Math.ceil(state.profile.budget / 1000) * 1000)}" step="1000" value="${state.profile.budget}"
+          ${state.filtersPending || state.deckLoading || state.sessionNeedsRetry || !state.userId ? 'disabled' : ''}
+          oninput="document.getElementById('discover-budget-val').textContent=fmtMoney(Number(this.value))"
           onchange="setDiscoverBudget(this.value)">
       </div>
     </div>
     <div class="panel-card">
       <h4>${t('your_profile_short')}</h4>
       <div class="legend-row"><div><div class="n">${majorsLabel(state.profile.majors)}</div><div class="d">${t('degree_' + state.profile.degreeLevel)} · GPA ${state.profile.gpa}</div></div></div>
-      <button class="restart-btn" style="width:100%;margin-top:8px;" onclick="restartOnboarding()">${t('edit_profile_link')}</button>
+      <button class="restart-btn" style="width:100%;margin-top:8px;" onclick="editOnboardingProfile()">${t('edit_profile_link')}</button>
     </div>`;
 }
 
@@ -5265,11 +5300,149 @@ function toggleDiscoverPanel(forceVal) {
   renderDiscover();
 }
 
+// The generated catalog mirrors the database, independently of deck filters and swipe history.
+function normalizeUniSearch(s) {
+  return String(s || '').toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9\u0400-\u04ff\p{L}]+/gu, ' ').trim();
+}
+const UNI_SEARCH_ALIASES = {
+  MIT: 'мити мти мит массачусетский технологический институт',
+  'Stanford University': 'стэнфорд стенфорд',
+  'Harvard University': 'гарвард',
+  'University of Oxford': 'оксфорд',
+  'University of Cambridge': 'кембридж',
+  'University of Buenos Aires': 'uba universidad de buenos aires буенос айрес'
+};
+let uniSearchIndex;
+function searchUniversities(query) {
+  const q = normalizeUniSearch(query);
+  if (!q) return [];
+  const wikiTitle = url => {
+    if (!url) return '';
+    const title = url.split('/').pop();
+    try { return decodeURIComponent(title); } catch { return title; }
+  };
+  uniSearchIndex ||= UNIVERSITIES.map(u => {
+    const { wiki, wiki_ru: wikiRu } = UNI_FACTS[u.id] || {};
+    const name = normalizeUniSearch(u.name);
+    const alt = normalizeUniSearch([wikiTitle(wiki), wikiTitle(wikiRu), UNI_SEARCH_ALIASES[u.name]].filter(Boolean).join(' '));
+    return { u, name, alt, text: [name, alt, normalizeUniSearch(`${u.city} ${u.country} ${COUNTRY_RU[u.country] || ''}`)].join(' ') };
+  });
+  const terms = q.split(' ');
+  return uniSearchIndex.filter(row => terms.every(word => row.text.includes(word)))
+    .map(row => ({ ...row, rank: row.name === q ? 0 : row.name.startsWith(q) ? 1 : row.name.includes(q) ? 2 : row.alt.includes(q) ? 3 : 4 }))
+    .sort((a, b) => a.rank - b.rank || a.u.name.localeCompare(b.u.name));
+}
+function catalogSearchHtml() {
+  const ru = isRu();
+  return `<div class="discover-catalog" id="discoverCatalog">
+    <div class="discover-catalog-head">
+      <label for="discoverSearch">${ru ? 'Поиск по каталогу' : 'Search the catalog'}</label>
+      <span>${ru ? `Все ${UNIVERSITIES.length} вузов` : `All ${UNIVERSITIES.length} universities`}</span>
+    </div>
+    <div class="discover-search-box">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.4"/><path d="m16 16 4 4" stroke-linecap="round"/></svg>
+      <input id="discoverSearch" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="discoverResults" autocomplete="off" spellcheck="false" maxlength="120" placeholder="${ru ? 'Название, город или страна' : 'Name, city or country'}">
+      <button class="discover-search-clear" type="button" aria-label="${ru ? 'Очистить поиск' : 'Clear search'}" hidden>${ICONS.x}</button>
+    </div>
+    <div class="discover-search-popup" hidden>
+      <ul id="discoverResults" role="listbox" aria-label="${ru ? 'Найденные вузы' : 'University results'}"></ul>
+      <p class="discover-search-status" role="status"></p>
+    </div>
+  </div>`;
+}
+function mountCatalogSearch() {
+  const box = document.getElementById('discoverCatalog');
+  const input = box.querySelector('input');
+  const popup = box.querySelector('.discover-search-popup');
+  const list = box.querySelector('[role=listbox]');
+  const status = box.querySelector('[role=status]');
+  const clear = box.querySelector('button');
+  let results = [], active = -1;
+  input.value = state.uniSearchQuery || '';
+  clear.hidden = !input.value;
+
+  function close() {
+    popup.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+    active = -1;
+    list.querySelector('[aria-selected=true]')?.setAttribute('aria-selected', 'false');
+  }
+  function refresh() {
+    clear.hidden = !input.value;
+    if (!normalizeUniSearch(input.value)) { close(); return; }
+    const rows = searchUniversities(input.value);
+    results = rows.slice(0, 8).map(({ u }) => u);
+    list.innerHTML = results.map(u => `<li id="uni-result-${u.id}" role="option" aria-selected="false" data-uni-id="${u.id}">
+      <span class="discover-mini-photo uni-visual-host">${uniVisual(u)}</span>
+      <span class="discover-result-copy"><strong>${esc2(u.name)}</strong><small>${esc2(u.city)}, ${esc2(cName(u.country))}</small></span>
+      <span class="discover-result-arrow" aria-hidden="true">↗</span>
+    </li>`).join('');
+    list.scrollTop = 0;
+    status.textContent = rows.length
+      ? (isRu() ? `Показано ${results.length} из ${rows.length}` : `Showing ${results.length} of ${rows.length}`)
+      : (isRu() ? 'Ничего не найдено. Попробуй другое название, город или страну.' : 'No results. Try a different name, city or country.');
+    active = -1;
+    input.removeAttribute('aria-activedescendant');
+    popup.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  }
+  function openResult(id) { close(); viewUniversity(id, 'discover'); }
+  input.addEventListener('input', () => { state.uniSearchQuery = input.value; refresh(); });
+  input.addEventListener('focus', refresh);
+  input.addEventListener('keydown', e => {
+    if (e.isComposing) return;
+    if (e.key === 'Escape' && !popup.hidden) { e.preventDefault(); e.stopPropagation(); close(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (popup.hidden) refresh();
+      if (popup.hidden || !results.length) return;
+      e.preventDefault();
+      const next = e.key === 'ArrowDown' ? active + 1 : (active === -1 ? results.length - 1 : active - 1);
+      active = (next + results.length) % results.length;
+      const option = list.children[active];
+      for (const el of list.children) el.setAttribute('aria-selected', String(el === option));
+      input.setAttribute('aria-activedescendant', option.id);
+      option.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter' && !popup.hidden && results.length) {
+      e.preventDefault();
+      openResult(results[Math.max(active, 0)].id);
+    }
+  });
+  // Keep focus on the input while a mouse click is selecting an option.
+  list.addEventListener('mousedown', e => e.preventDefault());
+  list.addEventListener('click', e => {
+    const option = e.target.closest('[data-uni-id]');
+    if (option) openResult(Number(option.dataset.uniId));
+  });
+  clear.addEventListener('click', () => { input.value = state.uniSearchQuery = ''; close(); clear.hidden = true; input.focus(); });
+  box.addEventListener('focusout', e => { if (!box.contains(e.relatedTarget)) close(); });
+}
+function upcomingUniversitiesHtml(deck) {
+  const ru = isRu();
+  if (deck.length < 2) return '';
+  return `<aside class="discover-upcoming">
+    <h2>${ru ? 'Дальше в подборке' : 'Up next in Discover'}</h2>
+    <p>${ru ? 'Можно открыть вуз, не листая карточки.' : 'Open a university without swiping through the deck.'}</p>
+    ${deck.slice(1, 4).map(u => `<button type="button" onclick="viewUniversity(${u.id}, 'discover')">
+      <span class="discover-mini-photo uni-visual-host">${uniVisual(u)}</span>
+      <span class="discover-result-copy"><strong>${esc2(u.name)}</strong><small>${esc2(cName(u.country))} · ${u._match}% ${ru ? 'совпадение' : 'match'}</small></span>
+      <span class="discover-result-arrow" aria-hidden="true">↗</span>
+    </button>`).join('')}
+  </aside>`;
+}
+
 function renderDiscover() {
   const deck = state.deck;
   let cardsHtml = '';
-  if (state.deckLoading) {
+  if (state.deckLoading || state.filtersPending) {
     cardsHtml = deckSkeletonHtml(2);
+  } else if (state.deckError) {
+    cardsHtml = `<div class="deck-empty">
+      <h3>${isRu() ? 'Не удалось загрузить подборку' : 'Could not load your recommendations'}</h3>
+      <p>${isRu() ? 'Проверь подключение к интернету и попробуй снова. Поиск по каталогу доступен.' : 'Check your connection and try again. You can still search the catalog.'}</p>
+      <button class="btn btn-primary" onclick="retryDiscoverLoad()">${isRu() ? 'Попробовать снова' : 'Try again'}</button>
+      </div>`;
   } else if (deck.length === 0) {
     cardsHtml = `<div class="deck-empty">
         <svg class="empty-illustration" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9 15c1 1 5 1 6 0"/></svg>
@@ -5284,7 +5457,7 @@ function renderDiscover() {
       const isTop = (i === visible.length - 1);
       return `<div class="hero-card${isTop && state.returningId === u.id ? ' is-returning' : ''}" id="card-${u.id}" style="z-index:${i}; transform:scale(${0.96 + i * 0.02}) translateY(${(visible.length - 1 - i) * -8}px);">
         <div class="hero-card-photo uni-visual-host">
-          ${uniVisual(u)}
+          ${uniVisual(u, isTop)}
         </div>
         <div class="hero-card-scrim"></div>
         <div class="hero-badge badge-${u._reality}">${state.lang === 'ru' ? 'Шанс' : 'Chance'}: ${chanceLabel(u._reality)}</div>
@@ -5292,6 +5465,7 @@ function renderDiscover() {
         <div class="hero-card-content">
           <h3>${u.name}</h3>
           <p class="hero-card-loc"><span class="loc-icon">${ICONS.pin}</span>${u.city}, ${cName(u.country)}${uniFactsLine(u) ? ' · ' + uniFactsLine(u) : ''}</p>
+          ${grantBadge(u)}
           <p class="hero-card-tagline">${uniTagline(u)}</p>
           <ul class="hero-card-points">
             ${quickTakeaway(u).plus.map(p => `<li class="qt-plus">${ICONS.check}<span>${typoDash(p)}</span></li>`).join('')}
@@ -5310,10 +5484,12 @@ function renderDiscover() {
 
   const liked = state.liked;
   const dotsCount = state.deckLoading ? 2 : Math.min(3, deck.length);
-  const subText = state.deckLoading ? t('discover_sub_loading') : (state.deckFallback ? t('discover_sub_fallback') : t('discover_sub', deck.length));
+  const subText = state.deckLoading || state.filtersPending ? t('discover_sub_loading') :
+    (state.deckError ? '' : (state.deckFallback ? t('discover_sub_fallback') : t('discover_sub', deck.length)));
 
   document.getElementById('content').innerHTML = `
     <div class="discover-hero">
+      ${catalogSearchHtml()}
       <div class="hero-topbar">
         <div class="hero-progress">${Array.from({ length: Math.max(dotsCount, 1) }).map((_, i) => `<span class="hero-progress-dot${i === 0 ? ' active' : ''}"></span>`).join('')}</div>
         <button class="hero-icon-btn" onclick="toggleDiscoverPanel(true)" aria-label="${t('filters_title')}">${ICONS.sliders}</button>
@@ -5322,12 +5498,13 @@ function renderDiscover() {
       ${catalogUpdatedLabel() ? `<p class="catalog-fresh"><span class="cf-dot"></span>${catalogUpdatedLabel()}</p>` : ''}
       <div class="hero-stage">
         <div class="hero-card-stack">${cardsHtml}</div>
+        ${state.deckLoading || state.filtersPending || state.deckError ? '' : upcomingUniversitiesHtml(deck)}
         ${liked.length ? `<button class="hero-avatar-stack" onclick="go('matches')" aria-label="${t('your_matches', liked.length)}">
           ${liked.slice(-3).reverse().map(u => `<div class="hero-avatar" style="${cardPhotoStyle(u)}"></div>`).join('')}
           <div class="hero-avatar-count">${liked.length}</div>
         </button>` : ''}
       </div>
-      ${(!state.deckLoading && deck.length > 0) ? `<div class="swipe-actions hero-actions">
+      ${(!state.deckLoading && !state.filtersPending && !state.deckError && deck.length > 0) ? `<div class="swipe-actions hero-actions">
         <button class="action-btn dislike" onclick="swipeTop('dislike')" aria-label="${state.lang === 'ru' ? 'Пропустить' : 'Pass'}">${ICONS.x}</button>
         <button class="action-btn info" onclick="openFromDeck()" aria-label="${state.lang === 'ru' ? 'Подробнее' : 'Details'}">${ICONS.info}</button>
         <button class="action-btn like big" onclick="swipeTop('like')" aria-label="${state.lang === 'ru' ? 'Нравится' : 'Like'}">${ICONS.heart}</button>
@@ -5343,7 +5520,8 @@ function renderDiscover() {
       <div class="hero-panel-body">${discoverPanelHtml()}</div>
     </div>`;
 
-  if (deck.length > 0) attachSwipeHandlers(deck[0].id);
+  mountCatalogSearch();
+  if (deck.length > 0 && !state.deckLoading && !state.filtersPending && !state.deckError) attachSwipeHandlers(deck[0].id);
   animateScoreCounters(document);
   animateRadar(document);
 }
@@ -5414,9 +5592,10 @@ function attachSwipeHandlers(topId) {
   card.addEventListener('touchend', pointerUp);
 }
 
-function doSwipe(direction, velocity) {
+async function doSwipe(direction, velocity) {
   const u = state.deck[0];
-  if (!u) return;
+  if (!u || !state.userId || state.swipePending || state.deckLoading || state.deckError || state.filtersPending) return;
+  state.swipePending = true;
   const card = document.getElementById('card-' + u.id);
   const flyDistance = Math.max(window.innerWidth, 480) * 1.35;
   // Чем резче был флик пальцем — тем быстрее и дальше улетает карточка, как в настоящем Tinder
@@ -5430,8 +5609,12 @@ function doSwipe(direction, velocity) {
     card.style.opacity = '0';
   }
   if (navigator.vibrate) { try { navigator.vibrate(direction === 'like' ? [10] : [10]); } catch (e) { } }
-  setTimeout(() => {
-    state.deck.shift();
+  try {
+    await Promise.all([
+      apiPostSwipe(state.userId, u.id, direction === 'like'),
+      new Promise(resolve => setTimeout(resolve, duration)),
+    ]);
+    state.deck = state.deck.filter(x => x.id !== u.id);
     bumpDailyActivity();
     state.swipeHistory = state.swipeHistory || [];
     state.swipeHistory.push({ u, direction });
@@ -5449,50 +5632,61 @@ function doSwipe(direction, velocity) {
       state.recentPasses.unshift(u);
       if (state.recentPasses.length > 3) state.recentPasses.pop();
     }
-    renderDiscover();
-    // Пишем свайп на бэк уже после того, как карточка визуально улетела — если
-    // запрос не пройдёт, apiRequest сам покажет toast, а локальный UI уже не откатываем
-    // (свайп в этом демо необратим локально; чтобы отменить лайк — есть toggleLike на странице вуза).
-    apiPostSwipe(state.userId, u.id, direction === 'like').catch(() => { });
-  }, duration);
+  } catch (e) {
+    // The card remains in the deck when the server has not acknowledged it.
+  } finally {
+    state.swipePending = false;
+    renderApp();
+  }
 }
 function swipeTop(direction) { doSwipe(direction, 0); }
 /* Вернуть последний свайп: карточка возвращается наверх колоды, лайк/пропуск
    снимается и на сервере (DELETE /users/{id}/swipes/{uni}). */
 async function undoSwipe() {
-  const last = (state.swipeHistory || []).pop();
+  if (!state.userId || state.swipePending || state.deckLoading || state.deckError || state.filtersPending) return;
+  const last = (state.swipeHistory || []).at(-1);
   if (!last) return;
   const { u, direction } = last;
-  if (direction === 'like') {
-    state.liked = state.liked.filter(x => x.id !== u.id);
-    removeTrackerEntry(u.id);
-  } else {
-    state.disliked = state.disliked.filter(x => x.id !== u.id);
-    state.recentPasses = state.recentPasses.filter(x => x.id !== u.id);
+  state.swipePending = true;
+  try {
+    await apiDeleteSwipe(state.userId, u.id);
+    state.swipeHistory.pop();
+    if (direction === 'like') {
+      state.liked = state.liked.filter(x => x.id !== u.id);
+      removeTrackerEntry(u.id);
+    } else {
+      state.disliked = state.disliked.filter(x => x.id !== u.id);
+      state.recentPasses = state.recentPasses.filter(x => x.id !== u.id);
+    }
+    state.deck = state.deck.filter(x => x.id !== u.id);
+    state.deck.unshift(u);
+    state.returningId = u.id;
+    toast(state.lang === 'ru' ? `Вернули: ${u.name}` : `Restored: ${u.name}`);
+  } catch (e) {
+    // Preserve history so the same undo can be retried.
+  } finally {
+    state.swipePending = false;
+    renderApp();
   }
-  state.deck = state.deck.filter(x => x.id !== u.id);
-  state.deck.unshift(u);
-  state.returningId = u.id;
-  renderDiscover();
-  toast(state.lang === 'ru' ? `Вернули: ${u.name}` : `Restored: ${u.name}`);
-  try { await apiDeleteSwipe(state.userId, u.id); } catch (e) { }
 }
 
 /* ---------- Keyboard shortcuts: ← Pass / → Like, only while a card is on screen ---------- */
 document.addEventListener('keydown', (e) => {
-  if (state.screen !== 'discover') return;
+  if (state.screen !== 'discover' || state.paywallOpen || !document.getElementById('login').classList.contains('hidden') ||
+      document.getElementById('mainapp').classList.contains('hidden') || e.defaultPrevented ||
+      e.target.closest?.('#discoverCatalog, .discover-upcoming, [contenteditable], [role="dialog"]')) return;
   if (e.key === 'Escape' && state.discoverPanelOpen) { toggleDiscoverPanel(false); return; }
   const tag = (document.activeElement && document.activeElement.tagName) || '';
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack typing into a text field
   if (state.discoverPanelOpen) return;
-  if (e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z')) { e.preventDefault(); undoSwipe(); return; }
+  if (e.repeat || ((e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) && e.key.startsWith('Arrow'))) return;
   if (!state.deck.length) return;
   if (e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z')) { e.preventDefault(); undoSwipe(); return; }
   if (e.key === 'ArrowRight') { e.preventDefault(); doSwipe('like'); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); doSwipe('dislike'); }
 });
 function openFromDeck() {
-  if (state.deck[0]) { state.currentUniId = state.deck[0].id; state.activeTab = 'overview'; go('university'); }
+  if (state.deck[0]) viewUniversity(state.deck[0].id, 'discover');
 }
 
 /* ============================================================
@@ -5776,7 +5970,7 @@ async function renderSharedView(token) {
       `<div class="auth-error">${ICONS.info}<span>${t('share_invalid')}</span></div>`;
   }
 }
-function esc2(s) { return String(s == null ? '' : s).replace(/&/g, '&' + 'amp;').replace(/</g, '&' + 'lt;').replace(/>/g, '&' + 'gt;'); }
+function esc2(s) { return String(s ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'})[char]); }
 
 /* ---------- ДОСКА ----------
    Упрощённая версия: одна строка сводки, фильтр по статусу вместо четырёх
@@ -6109,7 +6303,7 @@ function renderMatches() {
       list.map(u => `
         <div class="match-list-row reveal" onclick="viewUniversity(${u.id})">
           <div class="match-thumb uni-visual-host">${uniVisual(u)}</div>
-          <div class="match-info"><h4>${u.name}</h4><div class="loc">${u.city}, ${cName(u.country)}${uniFactsLine(u) ? ' · ' + uniFactsLine(u) : ''}</div><p class="match-desc">${uniTagline(u)}</p></div>
+          <div class="match-info"><h4>${u.name}</h4><div class="loc">${u.city}, ${cName(u.country)}${uniFactsLine(u) ? ' · ' + uniFactsLine(u) : ''}</div><p class="match-desc">${uniTagline(u)}</p>${grantBadge(u)}</div>
           <div class="match-score-block"><div class="v score-count" data-target="${u._match}">0%</div><div class="l">${state.lang === 'ru' ? 'совпадение' : 'match'}</div></div>
           <span class="badge badge-${u._reality}">${chanceLabel(u._reality)}</span>
         </div>`).join('')
@@ -6118,8 +6312,9 @@ function renderMatches() {
   animateScoreCounters(document);
 }
 function setMatchFilter(f) { state.matchFilter = f; renderMatches(); }
-function viewUniversity(id) {
+function viewUniversity(id, from = state.screen) {
   state.currentUniId = id;
+  state.uniBack = ['matches', 'tracker', 'discover'].includes(from) ? from : 'discover';
   state.activeTab = 'overview';
   go('university');
   ensureUniLoaded(id);
@@ -6133,7 +6328,7 @@ function findUni(id) {
   if (u) return u;
   const base = UNIVERSITIES.find(x => x.id === id);
   if (!base) return null;
-  return { ...base, _match: matchScore(base, state.profile), _reality: admissionReality(base, state.profile) };
+  return fromApiUniScored(base);
 }
 
 /* ИСПРАВЛЕНИЕ: раньше findUni() либо находил вуз среди уже загруженного
@@ -6281,13 +6476,17 @@ function renderUniversityDetail() {
   const factsLine = uniFactsLine(u);
   document.getElementById('content').innerHTML = `
   <article class="ud">
-    <button class="ud-back" onclick="go('${isSaved ? 'matches' : 'discover'}')">${ICONS.back}<span>${isSaved ? (ru ? 'К понравившимся' : 'Back to saved') : (ru ? 'К подбору' : 'Back to Discover')}</span></button>
-    <div class="ud-photo uni-visual-host">${uniVisual(u)}</div>
+    <button class="ud-back" onclick="go('${state.uniBack || 'discover'}')">${ICONS.back}<span>${{
+      matches: ru ? 'К понравившимся' : 'Back to saved',
+      tracker: ru ? 'К заявкам' : 'Back to applications'
+    }[state.uniBack] || (ru ? 'К подбору' : 'Back to Discover')}</span></button>
+    <div class="ud-photo uni-visual-host">${uniVisual(u, true)}</div>
     <header class="ud-head">
       <div class="ud-head-l">
         <p class="ud-loc">${u.city}, ${cName(u.country)}${factsLine ? ' · ' + factsLine : ''}</p>
         <h1>${u.name}</h1>
         ${d ? `<p class="ud-tag">${L2(d.tag)}</p>` : ''}
+        ${grantBadge(u)}
       </div>
       <div class="ud-actions">
         <button class="ud-save ${isSaved ? 'is-saved' : ''}" onclick="toggleLike(${u.id})">${ICONS.heart}<span>${isSaved ? t('in_matches_btn') : t('save_btn')}</span></button>
@@ -6296,7 +6495,7 @@ function renderUniversityDetail() {
       </div>
     </header>
     ${keyStrip}
-    <nav class="ud-tabs">${tabs.map(([id, label]) => `<button class="${state.activeTab === id ? 'active' : ''}" onclick="setUniTab('${id}')">${label}</button>`).join('')}</nav>
+    <nav class="ud-tabs" aria-label="${isRu() ? 'Разделы карточки' : 'University sections'}">${tabs.map(([id, label]) => `<button type="button" data-uni-tab="${id}" aria-pressed="${state.activeTab === id}" class="${state.activeTab === id ? 'active' : ''}" onclick="setUniTab('${id}')">${label}</button>`).join('')}</nav>
     <div class="ud-grid">
       <div class="ud-main">${tabContent}</div>
       <aside class="ud-aside">
@@ -6425,26 +6624,45 @@ function quickTakeaway(u) {
 }
 function uniTagline(u) { const d = uniData(u); return d ? L2(d.tag) : uniDesc(u); }
 
-function setUniTab(id) { state.activeTab = id; renderUniversityDetail(); }
+function setUniTab(id) {
+  const wasFocused = document.activeElement?.dataset.uniTab === id;
+  state.activeTab = id;
+  renderUniversityDetail();
+  if (wasFocused) document.querySelector(`.ud-tabs [data-uni-tab="${id}"]`)?.focus({ preventScroll: true });
+}
 async function toggleLike(id) {
-  const idx = state.liked.findIndex(x => x.id === id);
+  const u = findUni(id);
+  if (!u || !state.userId || state.swipePending || state.filtersPending || state.deckLoading || state.sessionNeedsRetry) return;
+  const isSaved = state.liked.some(x => x.id === id);
+  state.swipePending = true;
   try {
-    if (idx > -1) {
+    if (isSaved) {
       await apiDeleteSwipe(state.userId, id); // DELETE — убирает свайп из истории, вуз снова может попасть в deck
-      state.liked.splice(idx, 1);
+      state.liked = state.liked.filter(x => x.id !== id);
+      if (state.deckFallback || (
+        (!state.profile.continents.length || state.profile.continents.includes(u.continent)) &&
+        (!state.profile.countries.length || state.profile.countries.includes(u.country))
+      )) {
+        state.deck = [...state.deck.filter(x => x.id !== id), u].sort((a, b) => b._match - a._match || a.id - b.id);
+      }
       removeTrackerEntry(id); // Application Tracker: карточка заявки пропадает вместе с лайком
       toast(t('removed_from_matches'));
     } else {
       await apiPostSwipe(state.userId, id, true);
-      const u = findUni(id);
       state.liked.push(u);
+      state.deck = state.deck.filter(x => x.id !== id);
       ensureTrackerEntry(id); // Application Tracker: карточка заявки появляется автоматически
       toast(t('added_to_matches_short'));
     }
+    state.disliked = state.disliked.filter(x => x.id !== id);
+    state.recentPasses = state.recentPasses.filter(x => x.id !== id);
+    state.swipeHistory = (state.swipeHistory || []).filter(entry => entry.u.id !== id);
   } catch (e) {
-    return; // ошибка уже показана тостом внутри apiRequest, локальный state не трогаем
+    // apiRequest has shown an error. Keep previously confirmed UI state.
+  } finally {
+    state.swipePending = false;
+    renderApp();
   }
-  renderUniversityDetail();
 }
 
 /* ============================================================
@@ -6625,7 +6843,9 @@ function renderDNA() {
    функцию, чтобы её же вызывать сразу после успешного логина/регистрации
    (submitAuthForm) — не дублировать 3 запроса и переключение экранов. */
 async function loadSessionForUser(userId) {
+  state.userId = userId;
   state.deckLoading = true;
+  state.deckError = null;
   document.getElementById('landing').classList.add('hidden');
   document.getElementById('onboarding').classList.add('hidden');
   document.getElementById('login').classList.add('hidden');
@@ -6643,11 +6863,19 @@ async function loadSessionForUser(userId) {
     user = await apiFetchUser(userId);
   } catch (e) {
     state.deckLoading = false;
+    if (e.status !== 401 && e.status !== 404) {
+      state.deckError = userId;
+      state.sessionNeedsRetry = true;
+      saveGuestSession();
+      renderApp();
+      return;
+    }
     document.getElementById('mainapp').classList.add('hidden');
     document.getElementById('landing').classList.remove('hidden');
     clearAuthSession();
     try { lsRemove(GUEST_KEY); } catch (e2) { }
     try { toast(t('auth_session_expired')); } catch (e3) { }
+    state.userId = null;
     state.guestId = generateGuestId();
     renderLanding();
     return;
@@ -6657,6 +6885,7 @@ async function loadSessionForUser(userId) {
   state.isRegistered = user.isRegistered;
   state.email = user.email;
   state.lang = user.lang || state.lang;
+  document.documentElement.lang = state.lang;
   state.isPremium = !!user.isPremium;
   state.profile = Object.assign(state.profile, user.profile);
   applyProfileExtras(state.profile);
@@ -6675,6 +6904,7 @@ async function loadSessionForUser(userId) {
   state.obMajorCategory = findMajorCategory(state.profile.major);
 
   // 2) уже лайкнутые вузы — GET /users/{id}/matches (нужны для экранов Matches/DNA)
+  try {
   const matches = await apiFetchMatches(state.userId);
   // dedupe по id: Application Tracker хранит прогресс в объекте, ключом
   // которого служит u.id (см. ensureTrackerEntry/data[u.id] ниже) — если
@@ -6692,10 +6922,41 @@ async function loadSessionForUser(userId) {
 
   // 3) сама подборка на сегодня — GET /universities?user_id= (уже без свайпнутых)
   await buildDeck();
+  state.sessionNeedsRetry = false;
+  } catch (e) {
+    state.deckError = userId;
+    state.sessionNeedsRetry = true;
+  } finally {
+    state.deckLoading = false;
+    saveGuestSession();
+    renderApp();
+  }
+}
 
-  state.deckLoading = false;
-  saveGuestSession();
-  renderApp();
+function retryDiscoverLoad() {
+  if (state.sessionNeedsRetry) return loadSessionForUser(state.userId);
+  return refreshDiscoverDeck();
+}
+
+async function checkPaymentReturn(userId) {
+  toast(t('pm_pay_check'));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (state.userId !== userId) return;
+    try {
+      const user = await apiRequest(`/users/${userId}`, {}, { silent: true });
+      if (state.userId !== userId) return;
+      if (user.isPremium) {
+        state.isPremium = true;
+        renderApp();
+        toast(t('pm_pay_confirmed'));
+        return;
+      }
+    } catch (e) {
+      if (e.status === 401 || e.status === 404) break;
+    }
+    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+  if (state.userId === userId) toast(t('pm_pay_pending'));
 }
 
 (async function init() {
@@ -6709,6 +6970,12 @@ async function loadSessionForUser(userId) {
       e.target.classList.add('loaded');
     }
   }, true); // capture=true: события load у <img> не всплывают
+  document.addEventListener('error', e => {
+    if (!e.target.classList?.contains('uni-photo')) return;
+    const placeholder = e.target.previousElementSibling;
+    if (placeholder?.classList.contains('uni-photo-unavailable')) placeholder.hidden = false;
+    e.target.remove();
+  }, true);
   // Заливка трека слайдеров на лету: перехватываем любой input[type=range]
   // на документе, чтобы не вешать обработчик на каждый слайдер после каждого
   // innerHTML-перерендера (см. paintRange выше).
@@ -6718,20 +6985,11 @@ async function loadSessionForUser(userId) {
   // Ссылка «только для чтения» для родителя/консультанта (#share=<token>):
   // отдельный экран без входа в аккаунт — гостевую сессию не трогаем.
   if (await maybeRenderSharedView()) return;
-  // Возврат со страницы оплаты Stripe (?payment=success): вебхук может
-  // прийти чуть позже редиректа — показываем тост и перезагружаем профиль
-  // через пару секунд, чтобы isPremium подтянулся сам.
-  {
-    const qp = new URLSearchParams(location.search);
-    if (qp.get('payment') === 'success') {
-      history.replaceState(null, '', location.pathname + location.hash);
-      toast(t('pm_pay_success'));
-      setTimeout(async () => {
-        if (state.userId) { try { await loadSessionForUser(state.userId); } catch (e) { } }
-      }, 4000);
-    } else if (qp.get('payment') === 'cancel') {
-      history.replaceState(null, '', location.pathname + location.hash);
-    }
+  const returnUrl = new URL(location.href);
+  const paymentReturn = returnUrl.searchParams.get('payment');
+  if (paymentReturn === 'success' || paymentReturn === 'cancel') {
+    returnUrl.searchParams.delete('payment');
+    history.replaceState(null, '', returnUrl);
   }
   // Конфиг оплаты {stripe, demo} — фронт рисует честные кнопки Premium.
   loadPaymentsConfig();
@@ -6748,20 +7006,13 @@ async function loadSessionForUser(userId) {
 
   if (saved && saved.userId) {
     state.lang = saved.lang || 'ru';
-    try {
-      await loadSessionForUser(saved.userId);
-      return;
-    } catch (e) {
-      // Бэкенд недоступен или userId на сервере больше не существует (например, БД
-      // пересоздали) — откатываемся на онбординг вместо зависшего skeleton-экрана.
-      state.deckLoading = false;
-      document.getElementById('mainapp').classList.add('hidden');
-      document.getElementById('landing').classList.remove('hidden');
-      try { lsRemove(GUEST_KEY); } catch (e2) { }
-    }
+    await loadSessionForUser(saved.userId);
+    if (paymentReturn === 'success' && state.userId) void checkPaymentReturn(saved.userId);
+    return;
   }
 
   state.guestId = (saved && saved.guestId) || generateGuestId();
   state.lang = (saved && saved.lang) || 'ru';
   renderLanding();
+  if (paymentReturn === 'success') toast(t('pm_pay_pending'));
 })();

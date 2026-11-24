@@ -12,6 +12,21 @@ on:
   pull_request:
 
 jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Admitly
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: node --check frontend/app.js && node --check frontend/unidata.js
+      - run: python3 tools/make_unidata.py --check
   backend:
     runs-on: ubuntu-latest
     defaults:
@@ -37,5 +52,5 @@ jobs:
           done
           curl -sf http://127.0.0.1:8000/health
       - run: python3 test_auth.py
-      - run: python3 test_catalog.py
+      - run: ADMITLY_DEMO_PREMIUM=1 python3 test_catalog.py
       - run: python3 test_social.py

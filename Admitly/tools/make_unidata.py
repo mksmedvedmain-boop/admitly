@@ -20,9 +20,11 @@ data/universities.json (фото кампусов, описания RU/EN, пл�
                       pros_ru, pros_en, con_ru, con_en, aidnote_ru, aidnote_en]}
   TOTAL_UNIVERSITIES_COUNT, REAL_CONTINENT_COUNTS, REAL_COUNTRIES_BY_CONTINENT
 """
+import argparse
 import datetime
 import json
 import os
+from urllib.parse import urlparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "backend", "data", "universities.json")
@@ -35,8 +37,21 @@ FIELDS = ("name", "city", "country", "continent", "cost", "acceptance",
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="Fail if the generated catalog is stale")
+    args = parser.parse_args()
     with open(SRC, encoding="utf-8") as f:
         rows = json.load(f)
+    seen = set()
+    for row in rows:
+        uid = row["id"]
+        if uid in seen:
+            raise SystemExit(f"Duplicate university id: {uid}")
+        seen.add(uid)
+        for field in ("photo", "website"):
+            url = urlparse(row.get(field, ""))
+            if url.scheme not in ("https", "http") or not url.hostname:
+                raise SystemExit(f"University {uid}: missing or invalid {field} URL")
 
     unis, extra, desc_ru, facts, photos, data = [], {}, {}, {}, {}, {}
     for u in rows:
@@ -77,17 +92,11 @@ def main():
         if u["country"] not in countries[u["continent"]]:
             countries[u["continent"]].append(u["country"])
 
-    # Дата «каталог обновлён»: если задан backend/data/catalog_meta.json
-    # {"verified_at": "YYYY-MM-DD"} — это дата последней ручной сверки цен;
-    # иначе берём mtime исходного JSON (дата изменения данных).
-    updated = None
-    try:
-        with open(META, encoding="utf-8") as f:
-            updated = json.load(f).get("verified_at")
-    except Exception:
-        pass
-    if not updated:
-        updated = datetime.date.fromtimestamp(os.path.getmtime(SRC)).isoformat()
+    # Checkout time is not the data update date. Keep verification separate.
+    with open(META, encoding="utf-8") as f:
+        updated = json.load(f).get("updated_at")
+    if updated:
+        updated = datetime.date.fromisoformat(updated).isoformat()
 
     js = (
         "/* Сгенерировано tools/make_unidata.py из backend/data/universities.json.\n"
@@ -106,6 +115,12 @@ def main():
         "const REAL_CONTINENT_COUNTS = " + json.dumps(continent_counts, separators=(",", ":")) + ";\n\n"
         "const REAL_COUNTRIES_BY_CONTINENT = " + json.dumps(countries, ensure_ascii=False, separators=(",", ":")) + ";\n"
     )
+    if args.check:
+        with open(DST, encoding="utf-8") as f:
+            if js != f.read():
+                raise SystemExit("Catalog is stale: run python3 tools/make_unidata.py")
+        print(f"Catalog matches: {len(rows)} universities")
+        return
     os.makedirs(os.path.dirname(DST), exist_ok=True)
     with open(DST, "w", encoding="utf-8") as f:
         f.write(js)

@@ -13,7 +13,11 @@ import os
 SQLALCHEMY_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./unimatch.db")
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
+    # The default driver behind postgresql:// varies by SQLAlchemy release.
+    # requirements.txt installs psycopg 3, not psycopg2.
+    "postgresql+psycopg://" + SQLALCHEMY_DATABASE_URL.split("://", 1)[1]
+    if SQLALCHEMY_DATABASE_URL.startswith(("postgresql://", "postgres://"))
+    else SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {},  # только для SQLite
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
